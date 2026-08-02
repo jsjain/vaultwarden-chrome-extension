@@ -17,6 +17,7 @@ if (path.basename(dist) !== "dist" || path.dirname(dist) !== root) {
 await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, "popup"), { recursive: true });
 await mkdir(path.join(dist, "offscreen"), { recursive: true });
+await mkdir(path.join(dist, "icons"), { recursive: true });
 await mkdir(artifacts, { recursive: true });
 
 await Promise.all([
@@ -24,6 +25,7 @@ await Promise.all([
   cp(path.join(root, "src/popup/index.html"), path.join(dist, "popup/index.html")),
   cp(path.join(root, "src/popup/styles.css"), path.join(dist, "popup/styles.css")),
   cp(path.join(root, "src/offscreen/index.html"), path.join(dist, "offscreen/index.html")),
+  cp(path.join(root, "src/icons"), path.join(dist, "icons"), { recursive: true }),
 ]);
 
 const common = {

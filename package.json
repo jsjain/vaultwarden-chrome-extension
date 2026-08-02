@@ -1,6 +1,6 @@
 {
   "name": "lean-vault-extension",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "A lightweight, open-source browser extension for Vaultwarden-compatible servers.",
   "license": "GPL-3.0-only",

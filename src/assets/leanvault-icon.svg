@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">LeanVault vault icon</title>
+  <rect width="128" height="128" rx="28" fill="#4b525e"/>
+  <g fill="none" stroke="#f3f4f6" stroke-linecap="round" stroke-linejoin="round" stroke-width="6">
+    <rect x="25" y="25" width="78" height="78" rx="12"/>
+    <circle cx="64" cy="64" r="11"/>
+    <path d="m45 45 11 11M83 45 72 56M45 83l11-11M83 83 72 72"/>
+  </g>
+  <g fill="#f3f4f6">
+    <circle cx="43" cy="43" r="3.5"/>
+    <circle cx="85" cy="43" r="3.5"/>
+    <circle cx="43" cy="85" r="3.5"/>
+    <circle cx="85" cy="85" r="3.5"/>
+  </g>
+</svg>

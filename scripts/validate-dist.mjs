@@ -20,7 +20,12 @@ if (manifest.background?.type !== "module") {
   throw new Error("The background service worker must be an ES module.");
 }
 
-const referencedFiles = [manifest.background?.service_worker, manifest.action?.default_popup];
+const referencedFiles = [
+  manifest.background?.service_worker,
+  manifest.action?.default_popup,
+  ...Object.values(manifest.icons ?? {}),
+  ...Object.values(manifest.action?.default_icon ?? {}),
+];
 for (const relativePath of referencedFiles) {
   if (typeof relativePath !== "string") {
     throw new Error("The manifest is missing a required extension entry point.");

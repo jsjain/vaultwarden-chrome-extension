@@ -25,7 +25,7 @@ Vaultwarden provides a resource-efficient, self-hosted implementation of the Bit
 server API. LeanVault applies the same lightweight idea to the browser client: a small extension,
 limited runtime permissions, no analytics, and independently loaded cryptography only when needed.
 
-Version **0.5.0** currently provides:
+Version **0.5.1** currently provides:
 
 - Custom Vaultwarden server URLs, including reverse-proxy subpaths.
 - PBKDF2 and Bitwarden-compatible Argon2id authentication.
