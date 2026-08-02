@@ -1,8 +1,8 @@
 # Security policy
 
-LeanVault is pre-alpha software. Version 0.3 can authenticate, decrypt, create, and update personal
-login ciphers, but it
-has not received an independent security audit and is not recommended for production credentials.
+LeanVault is unaudited security software. Version 1.0.0 can authenticate, decrypt, create, and update
+personal login ciphers, but it has not received an independent security audit and is not recommended
+for critical production credentials.
 
 ## Current guarantees
 
@@ -37,6 +37,20 @@ has not received an independent security audit and is not recommended for produc
 - Errors exposed to the popup do not include response bodies.
 - Website icons are resolved with Chrome's local `_favicon` facility; LeanVault does not send saved
   vault URLs to a third-party favicon service.
+- URI matching is directional and fail-closed: a child-domain credential cannot be offered to its
+  parent domain, and unsupported match strategies never authorize fill or credential disclosure.
+
+## Automated security checks
+
+- GitHub CodeQL scans JavaScript and TypeScript on changes to `main`, pull requests, a weekly
+  schedule, and manual dispatch using the `security-extended` query suite.
+- Dependency Review blocks pull requests that introduce dependencies with known vulnerabilities of
+  moderate severity or higher.
+- Dependabot checks npm packages and GitHub Actions weekly. GitHub secret scanning is also enabled
+  automatically for this public repository.
+
+Automation is a useful baseline, not a replacement for threat modeling, manual review, browser
+integration testing, or an independent audit.
 
 ## Reporting
 
@@ -46,6 +60,6 @@ minimal public issue that asks the maintainers for secure contact instructions.
 
 ## Required before production use
 
-Production use remains blocked on broader compatibility fixtures, automated browser/heap testing,
-a formal threat model, dependency/SBOM review, and an independent cryptography and extension audit.
-Vault writes, save/fill integration, and passkeys require separate security review before release.
+Critical production use remains blocked on broader compatibility fixtures, automated browser/heap
+testing, a formal threat model, dependency/SBOM review, and an independent cryptography and extension
+audit. Vault writes, save/fill integration, and passkeys require additional security review.

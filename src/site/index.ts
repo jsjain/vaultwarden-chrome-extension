@@ -9,6 +9,7 @@ let suggestions: Suggestion[] = [];
 let lastUsername = "";
 let lastCapture = "";
 let activeField: HTMLInputElement | null = null;
+let dismissActiveSavePrompt: (() => void) | null = null;
 
 if (!document.documentElement.hasAttribute(marker)) {
   document.documentElement.setAttribute(marker, "true");
@@ -20,7 +21,9 @@ async function initialize(): Promise<void> {
   document.addEventListener("input", rememberInput, true);
   document.addEventListener("submit", captureLogin, true);
   document.addEventListener("pointerdown", captureSubmitPointer, true);
+  document.addEventListener("pointerdown", dismissFieldMenuOnOutsideClick, true);
   document.addEventListener("keydown", captureEnter, true);
+  document.addEventListener("keydown", dismissOverlaysOnEscape, true);
   window.addEventListener("scroll", repositionOpenOverlay, true);
   window.addEventListener("resize", repositionOpenOverlay);
   try {
@@ -31,7 +34,11 @@ async function initialize(): Promise<void> {
     if (matches.type === "siteSuggestions") suggestions = matches.items;
     if (pending.type === "sitePrompt" && pending.prompt) renderSavePrompt(pending.prompt);
     const focused = deepActiveInput();
-    if (focused && isCredentialField(focused)) showFieldMenu(focused);
+    if (focused && isCredentialField(focused)) {
+      activeField = focused;
+      showFieldToggle(focused);
+      showFieldMenu(focused);
+    }
   } catch {
     // Locked, excluded, and signed-out vaults stay silent on the page.
   }
@@ -42,6 +49,7 @@ function handleFocus(event: FocusEvent): void {
   if (!(input instanceof HTMLInputElement) || !isCredentialField(input)) return;
   activeField = input;
   if (isUsernameField(input) && input.value) lastUsername = input.value;
+  showFieldToggle(input);
   showFieldMenu(input);
 }
 
@@ -51,12 +59,15 @@ function rememberInput(event: Event): void {
 }
 
 function showFieldMenu(input: HTMLInputElement): void {
-  document.getElementById("leanvault-field-menu")?.remove();
+  closeFieldMenu();
   if (suggestions.length === 0 && input.type.toLowerCase() !== "password") return;
   const host = overlayHost("leanvault-field-menu", input);
   const root = host.shadowRoot!;
-  root.innerHTML = `<style>${styles}</style><div class="field-menu" role="listbox"><div class="menu-title">LeanVault</div><div class="choices"></div></div>`;
+  root.innerHTML = `<style>${styles}</style><div class="field-menu" role="listbox"><div class="menu-title"><span>LeanVault</span><button class="menu-close" type="button" aria-label="Dismiss autofill suggestions" title="Dismiss">×</button></div><div class="choices"></div></div>`;
   const choices = root.querySelector<HTMLDivElement>(".choices")!;
+  const close = root.querySelector<HTMLButtonElement>(".menu-close")!;
+  close.addEventListener("pointerdown", (event) => event.preventDefault());
+  close.addEventListener("click", () => closeFieldMenu(host));
   for (const item of suggestions) {
     const button = document.createElement("button");
     button.type = "button";
@@ -92,7 +103,57 @@ function showFieldMenu(input: HTMLInputElement): void {
     generate.addEventListener("click", () => void generateAndFill(input, host));
     choices.append(generate);
   }
-  requestAnimationFrame(() => positionHost(host, input));
+  setFieldToggleExpanded(true);
+  positionHost(host, input);
+}
+
+function showFieldToggle(input: HTMLInputElement): void {
+  document.getElementById("leanvault-field-toggle")?.remove();
+  if (suggestions.length === 0 && input.type.toLowerCase() !== "password") return;
+  const host = overlayHost("leanvault-field-toggle", input);
+  const root = host.shadowRoot!;
+  root.innerHTML = `<style>${styles}</style><button class="field-toggle" type="button" aria-label="Toggle LeanVault suggestions" aria-expanded="true" title="Show or hide LeanVault suggestions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="16" height="18" rx="3"/><path d="M3 7h3M3 17h3"/><circle cx="13" cy="12" r="5"/><circle cx="13" cy="12" r="1.7"/><path d="M13 7v1.5M13 15.5V17M8 12h1.5M16.5 12H18"/></svg></button>`;
+  const button = root.querySelector<HTMLButtonElement>(".field-toggle")!;
+  button.addEventListener("pointerdown", (event) => event.preventDefault());
+  button.addEventListener("click", () => {
+    const menu = document.getElementById("leanvault-field-menu");
+    if (menu) closeFieldMenu(menu);
+    else showFieldMenu(input);
+  });
+  positionFieldToggle(host, input);
+}
+
+function closeFieldMenu(host = document.getElementById("leanvault-field-menu")): void {
+  host?.remove();
+  setFieldToggleExpanded(false);
+}
+
+function setFieldToggleExpanded(expanded: boolean): void {
+  const button = document.getElementById("leanvault-field-toggle")?.shadowRoot?.querySelector<HTMLButtonElement>(".field-toggle");
+  button?.setAttribute("aria-expanded", String(expanded));
+  button?.classList.toggle("expanded", expanded);
+}
+
+function dismissFieldMenuOnOutsideClick(event: PointerEvent): void {
+  const host = document.getElementById("leanvault-field-menu");
+  if (!host) return;
+  const path = event.composedPath();
+  const toggle = document.getElementById("leanvault-field-toggle");
+  if (path.includes(host) || (toggle && path.includes(toggle)) || (activeField && path.includes(activeField))) return;
+  closeFieldMenu(host);
+}
+
+function dismissOverlaysOnEscape(event: KeyboardEvent): void {
+  if (event.key !== "Escape") return;
+  const menu = document.getElementById("leanvault-field-menu");
+  if (menu) {
+    closeFieldMenu(menu);
+    event.stopPropagation();
+  }
+  if (dismissActiveSavePrompt) {
+    dismissActiveSavePrompt();
+    event.stopPropagation();
+  }
 }
 
 async function fill(id: string, preferred: HTMLInputElement, host: HTMLElement): Promise<void> {
@@ -104,7 +165,7 @@ async function fill(id: string, preferred: HTMLInputElement, host: HTMLElement):
     setInputValue(username, data.username);
     setInputValue(password, data.password);
     (password ?? username)?.focus();
-    host.remove();
+    closeFieldMenu(host);
   } catch (error) {
     showTransient(error instanceof Error ? error.message : "LeanVault could not fill this login.");
   }
@@ -117,7 +178,7 @@ async function generateAndFill(input: HTMLInputElement, host: HTMLElement): Prom
     setInputValue(input, data.password);
     input.focus();
     input.select();
-    host.remove();
+    closeFieldMenu(host);
     showTransient("A generated password was filled. Save it after submitting this form.");
   } catch (error) {
     showTransient(error instanceof Error ? error.message : "LeanVault could not generate a password.");
@@ -164,13 +225,16 @@ function inspectCredentials(scope: ParentNode): void {
     username,
     password: passwordField.value,
   }).then((data) => {
-    if (data.type === "sitePrompt" && data.prompt) renderSavePrompt(data.prompt, passwordField);
+    if (data.type === "sitePrompt" && data.prompt) renderSavePrompt(data.prompt);
   }).catch(() => undefined);
 }
 
-function renderSavePrompt(prompt: SitePrompt, anchor?: HTMLInputElement): void {
+function renderSavePrompt(prompt: SitePrompt): void {
   document.getElementById("leanvault-save-prompt")?.remove();
-  const host = overlayHost("leanvault-save-prompt", anchor);
+  const host = overlayHost("leanvault-save-prompt");
+  host.style.top = "18px";
+  host.style.right = "18px";
+  host.style.bottom = "auto";
   const root = host.shadowRoot!;
   root.innerHTML = `<style>${styles}</style><form class="prompt">
     <div class="prompt-heading"><strong>${prompt.action === "update" ? "Update existing login" : "Save login to LeanVault"}</strong><button class="close" type="button" aria-label="Not now">×</button></div>
@@ -194,10 +258,15 @@ function renderSavePrompt(prompt: SitePrompt, anchor?: HTMLInputElement): void {
     password.type = password.type === "password" ? "text" : "password";
     button.textContent = password.type === "password" ? "Show" : "Hide";
   });
+  let dismissed = false;
   const dismiss = () => {
-    void request({ type: "site.dismiss", promptId: prompt.id });
+    if (dismissed) return;
+    dismissed = true;
+    dismissActiveSavePrompt = null;
+    void request({ type: "site.dismiss", promptId: prompt.id }).catch(() => undefined);
     host.remove();
   };
+  dismissActiveSavePrompt = dismiss;
   root.querySelector<HTMLButtonElement>(".dismiss")!.addEventListener("click", dismiss);
   root.querySelector<HTMLButtonElement>(".close")!.addEventListener("click", dismiss);
   form.addEventListener("submit", (event) => {
@@ -207,6 +276,8 @@ function renderSavePrompt(prompt: SitePrompt, anchor?: HTMLInputElement): void {
     save.textContent = "Saving…";
     const login: LoginWriteInput = { name: name.value, username: username.value, password: password.value, uri: uri.value };
     void request({ type: "site.save", promptId: prompt.id, login }).then(() => {
+      dismissed = true;
+      dismissActiveSavePrompt = null;
       host.remove();
       showTransient(prompt.action === "update" ? "Login updated." : "Login saved.");
     }).catch((error: unknown) => {
@@ -215,18 +286,36 @@ function renderSavePrompt(prompt: SitePrompt, anchor?: HTMLInputElement): void {
       showTransient(error instanceof Error ? error.message : "LeanVault could not save this login.");
     });
   });
-  if (anchor) requestAnimationFrame(() => positionHost(host, anchor));
 }
 
 function overlayHost(id: string, anchor?: HTMLInputElement): HTMLDivElement {
   document.getElementById(id)?.remove();
   const host = document.createElement("div");
   host.id = id;
-  host.style.cssText = "all:initial;position:fixed;right:18px;bottom:18px;z-index:2147483647;width:min(390px,calc(100vw - 24px))";
+  host.style.cssText = "all:initial;display:block;position:fixed;inset:auto 18px 18px auto;margin:0;padding:0;border:0;background:transparent;overflow:visible;pointer-events:auto;z-index:2147483647;width:min(390px,calc(100vw - 24px))";
   if (anchor) host.dataset.anchor = "true";
+  host.setAttribute("popover", "manual");
   host.attachShadow({ mode: "open" });
   document.documentElement.append(host);
+  showInTopLayer(host);
   return host;
+}
+
+function showInTopLayer(host: HTMLElement): void {
+  try {
+    host.showPopover();
+  } catch {
+    // Chrome versions without Popover API keep the maximum-z-index fallback.
+  }
+  requestAnimationFrame(() => {
+    if (!host.isConnected) return;
+    try {
+      if (host.matches(":popover-open")) host.hidePopover();
+      host.showPopover();
+    } catch {
+      document.documentElement.append(host);
+    }
+  });
 }
 
 function positionHost(host: HTMLElement, anchor: HTMLInputElement): void {
@@ -243,10 +332,28 @@ function positionHost(host: HTMLElement, anchor: HTMLInputElement): void {
   host.style.top = `${Math.max(8, below ? rect.bottom + 4 : rect.top - Math.min(estimatedHeight, rect.top - 8) - 4)}px`;
 }
 
+function positionFieldToggle(host: HTMLElement, input: HTMLInputElement): void {
+  if (!input.isConnected || !visible(input)) {
+    host.remove();
+    closeFieldMenu();
+    return;
+  }
+  const rect = input.getBoundingClientRect();
+  const size = Math.max(24, Math.min(34, rect.height - 8));
+  host.style.width = `${size}px`;
+  host.style.height = `${size}px`;
+  host.style.right = "auto";
+  host.style.bottom = "auto";
+  host.style.left = `${Math.max(2, rect.right - size - 7)}px`;
+  host.style.top = `${rect.top + Math.max(4, (rect.height - size) / 2)}px`;
+}
+
 function repositionOpenOverlay(): void {
   if (!activeField) return;
   const menu = document.getElementById("leanvault-field-menu");
   if (menu) positionHost(menu, activeField);
+  const toggle = document.getElementById("leanvault-field-toggle");
+  if (toggle) positionFieldToggle(toggle, activeField);
 }
 
 function showTransient(message: string): void {
@@ -355,7 +462,8 @@ async function request(value: ExtensionRequest): Promise<ResponseData> {
 const styles = `
   *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}
   button,input{font:inherit}button{cursor:pointer}.field-menu,.prompt{overflow:hidden;border:1px solid #525a67;border-radius:10px;background:#2e333c;color:#f6f7f9;box-shadow:0 10px 30px #0005}
-  .menu-title{padding:7px 12px;border-bottom:1px solid #474e59;color:#aeb5c0;font-size:11px;font-weight:750}
+  .menu-title{display:flex;min-height:38px;align-items:center;justify-content:space-between;gap:8px;padding:5px 7px 5px 12px;border-bottom:1px solid #474e59;color:#aeb5c0;font-size:11px;font-weight:750}.menu-close{display:grid;width:28px;height:28px;padding:0;place-items:center;border:0;border-radius:7px;background:transparent;color:#c8cdd5;font-size:20px;line-height:1}.menu-close:hover,.menu-close:focus-visible{background:#414751;color:#fff;outline:none}
+  .field-toggle{display:grid;width:100%;height:100%;padding:4px;place-items:center;border:1px solid #69727f;border-radius:8px;background:#4b525e;color:#f3f4f6;box-shadow:0 2px 8px #0004}.field-toggle:hover,.field-toggle:focus-visible,.field-toggle.expanded{background:#626b78;outline:none}.field-toggle svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .choices{max-height:310px;overflow:auto}.choice,.generate-choice{display:flex;width:100%;align-items:center;gap:11px;padding:10px 12px;border:0;border-bottom:1px solid #454b55;background:#2e333c;color:#f6f7f9;text-align:left}
   .choice:hover,.generate-choice:hover{background:#3a404a}.site-icon{display:grid;width:34px;height:34px;flex:none;overflow:hidden;place-items:center;border-radius:7px;background:#202630;color:#d7dce3;font-weight:800}.site-icon img{width:24px;height:24px;object-fit:contain}
   .choice-copy{display:grid;min-width:0;flex:1;gap:2px}.choice-copy strong,.choice-copy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.choice-copy strong{font-size:13px}.choice-copy span{color:#c1c6cf;font-size:11px}.fill-glyph{color:#b8bec8;font-size:22px}.generate-choice{justify-content:center;border-bottom:0;color:#e3e6eb;font-size:12px;font-weight:750}

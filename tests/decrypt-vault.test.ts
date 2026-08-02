@@ -6,6 +6,7 @@ import {
   listVaultItems,
   matchesCurrentUrl,
 } from "../src/vault/decrypt-vault";
+import type { VaultItem } from "../src/vault/models";
 
 const fixture = {
   Profile: { Email: "alice@example.com", Organizations: [] },
@@ -94,7 +95,61 @@ describe("vault decryption and matching", () => {
     expect(result.items).toEqual([]);
     expect(result.failures).toBe(1);
   });
+
+  it("never lets a child-domain credential match its parent domain", () => {
+    expect(
+      matchesCurrentUrl(loginForUri("https://attacker.targetbank.com"), "https://targetbank.com/login"),
+    ).toBe(false);
+    expect(
+      matchesCurrentUrl(loginForUri("https://targetbank.com"), "https://login.targetbank.com/login"),
+    ).toBe(true);
+  });
+
+  it("implements Host matching without broadening to subdomains or other ports", () => {
+    const item = loginForUri("https://login.example.com:8443/account", 1);
+
+    expect(matchesCurrentUrl(item, "https://login.example.com:8443/sign-in")).toBe(true);
+    expect(matchesCurrentUrl(item, "https://sub.login.example.com:8443/sign-in")).toBe(false);
+    expect(matchesCurrentUrl(item, "https://login.example.com/sign-in")).toBe(false);
+  });
+
+  it("implements Starts With and Exact matching independently", () => {
+    const startsWith = loginForUri("https://example.com/account", 2);
+    const exact = loginForUri("https://example.com/account", 3);
+
+    expect(matchesCurrentUrl(startsWith, "https://example.com/account/login")).toBe(true);
+    expect(matchesCurrentUrl(startsWith, "https://example.com/other")).toBe(false);
+    expect(matchesCurrentUrl(exact, "https://example.com/account")).toBe(true);
+    expect(matchesCurrentUrl(exact, "https://example.com/account/login")).toBe(false);
+  });
+
+  it("supports case-insensitive regular-expression matching and rejects invalid patterns", () => {
+    expect(
+      matchesCurrentUrl(
+        loginForUri("^https://[a-z]+\\.example\\.com/login", 4),
+        "https://ACCOUNTS.example.com/login",
+      ),
+    ).toBe(true);
+    expect(matchesCurrentUrl(loginForUri("[", 4), "https://example.com/")).toBe(false);
+  });
+
+  it("fails closed for Never and unknown URI match strategies", () => {
+    expect(matchesCurrentUrl(loginForUri("https://example.com", 5), "https://example.com/")).toBe(false);
+    expect(matchesCurrentUrl(loginForUri("https://example.com", 99), "https://example.com/")).toBe(false);
+  });
 });
+
+function loginForUri(uri: string, match?: number): VaultItem {
+  return {
+    id: "uri-match-test",
+    name: "URI match test",
+    username: "alice@example.com",
+    password: "secret",
+    favorite: false,
+    reprompt: false,
+    uris: [{ uri, ...(match === undefined ? {} : { match }) }],
+  };
+}
 
 function lowerCamelKeys(value: unknown): any {
   if (Array.isArray(value)) return value.map(lowerCamelKeys);

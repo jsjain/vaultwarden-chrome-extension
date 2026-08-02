@@ -16,8 +16,8 @@ and its full feature surface into the browser.
 > or Vaultwarden support channels.
 
 > [!WARNING]
-> This is pre-alpha security software and has not received an independent security audit. Test it
-> with a non-critical account before trusting it with important credentials.
+> This is unaudited security software. Test it with a non-critical account before trusting it with
+> important credentials, and review the documented security boundaries before regular use.
 
 ## Why LeanVault?
 
@@ -25,7 +25,7 @@ Vaultwarden provides a resource-efficient, self-hosted implementation of the Bit
 server API. LeanVault applies the same lightweight idea to the browser client: a small extension,
 limited runtime permissions, no analytics, and independently loaded cryptography only when needed.
 
-Version **0.5.1** currently provides:
+Version **1.0.0** is LeanVault's first public MVP release and provides:
 
 - Custom Vaultwarden server URLs, including reverse-proxy subpaths.
 - PBKDF2 and Bitwarden-compatible Argon2id authentication.
@@ -40,11 +40,14 @@ Version **0.5.1** currently provides:
 - Configurable locking: browser close, inactivity timeout, or encrypted device persistence until
   explicit lock/logout.
 
-## Install for development
+## Install from source
 
 Requirements: Node.js 22+ and pnpm.
 
 ```sh
+git clone https://github.com/jsjain/vaultwarden-chrome-extension.git
+cd vaultwarden-chrome-extension
+git checkout v1.0.0
 pnpm install
 pnpm verify
 ```
@@ -57,6 +60,8 @@ Then:
 4. After each update, confirm the version shown in LeanVault **Settings**.
 
 Every test build increments the extension version so a successful Chrome reload is visible.
+
+See the [v1.0.0 release notes](docs/releases/v1.0.0.md) for the feature and security summary.
 
 ## Security model
 
@@ -72,6 +77,11 @@ Every test build increments the extension version so a successful Chrome reload 
 - Favicons come from Chrome's local favicon facility, not from a third-party icon service.
 - Remote HTTP servers are rejected except for loopback development.
 - There is no analytics, telemetry, or remotely hosted executable code.
+- URI matching is directional and fail-closed so credentials saved for a child domain are not
+  exposed to its parent domain.
+
+CodeQL, dependency review, Dependabot, and GitHub's public-repository secret scanning provide an
+automated security baseline. These checks do not replace an independent security audit.
 
 See [SECURITY.md](SECURITY.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 

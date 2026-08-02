@@ -118,6 +118,19 @@ export function matchesCurrentUrl(item: VaultItem, currentUrl: string): boolean 
     return false;
   }
   return item.uris.some(({ uri, match }) => {
+    // Bitwarden URI match strategies: Domain (0/default), Host (1),
+    // Starts With (2), Exact (3), Regular Expression (4), and Never (5).
+    // Unknown strategies fail closed so a future server value cannot broaden access.
+    if (match === 5) {
+      return false;
+    }
+    if (match === 4) {
+      try {
+        return new RegExp(uri, "i").test(page.href);
+      } catch {
+        return false;
+      }
+    }
     const saved = safeUrl(uri);
     if (!saved) {
       return false;
@@ -128,16 +141,15 @@ export function matchesCurrentUrl(item: VaultItem, currentUrl: string): boolean 
     if (match === 2) {
       return page.href.startsWith(saved.href);
     }
-    if (match === 4) {
+    if (match === 1) {
       return page.hostname === saved.hostname && page.port === saved.port;
+    }
+    if (match !== undefined && match !== 0) {
+      return false;
     }
     const pageHost = page.hostname.toLocaleLowerCase();
     const savedHost = saved.hostname.toLocaleLowerCase();
-    return (
-      pageHost === savedHost ||
-      pageHost.endsWith(`.${savedHost}`) ||
-      savedHost.endsWith(`.${pageHost}`)
-    );
+    return pageHost === savedHost || pageHost.endsWith(`.${savedHost}`);
   });
 }
 
