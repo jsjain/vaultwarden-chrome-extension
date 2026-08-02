@@ -39,6 +39,23 @@
 
 - [x] Field-anchored matched-login picker and dynamic form observation.
 - [x] SPA, iframe manual fill, open-shadow-DOM detection, and HTTP downgrade handling.
+- [ ] Optional integrated Authenticator workspace:
+  - Disabled by default and exposed as a Vault-adjacent bottom tab only when enabled in Settings.
+  - Live TOTP cards with countdown progress, click-to-copy, and explicit fill into detected
+    one-time-code fields.
+  - QR enrollment from the visible page plus manual enrollment using a Base32 secret or validated
+    `otpauth://totp/` URI.
+  - Per-entry editing for name, optional nickname, account label, mapped website, issuer, and secret.
+  - A separately configurable smart filter that shows entries mapped to the active domain when
+    matches exist, falls back to all entries when none match, and always offers **View all**.
+  - Newline-delimited `otpauth://totp/` import and export with validation, duplicate detection,
+    preview/confirmation, and no secrets written to logs.
+  - SHA-1, SHA-256, and SHA-512 parameters, configurable digit counts and periods, plus Steam-code
+    compatibility where represented by the source URI.
+  - Security gates for protected-item reprompt, explicit user-triggered QR capture/export, strict
+    TOTP-only URI validation, domain-bound fill authorization, and clipboard clearing controls.
+  - Compatibility fixtures and negative tests for malformed QR payloads, oversized imports,
+    duplicate seeds, hostile labels, phishing-domain fill attempts, and lock/logout cleanup.
 - [ ] Passkey create/get bridge with RP ID and origin validation.
 - [ ] Basic-auth handling and adaptive notification sync.
 - [ ] Attachments, Send, import/export, organizations, and collections.

@@ -17,6 +17,7 @@ export async function configureSiteIntegration(enabled: boolean): Promise<void> 
         id: SCRIPT_ID,
         js: ["site.js"],
         matches: ["https://*/*", "http://*/*"],
+        allFrames: true,
         runAt: "document_idle",
         persistAcrossSessions: true,
       },

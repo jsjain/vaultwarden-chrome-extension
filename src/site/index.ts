@@ -36,7 +36,8 @@ async function initialize(): Promise<void> {
     const focused = deepActiveInput();
     if (focused && isCredentialField(focused)) {
       activeField = focused;
-      showFieldToggle(focused);
+      if (isUsernameField(focused)) showFieldToggle(focused);
+      else document.getElementById("leanvault-field-toggle")?.remove();
       showFieldMenu(focused);
     }
   } catch {
@@ -49,7 +50,8 @@ function handleFocus(event: FocusEvent): void {
   if (!(input instanceof HTMLInputElement) || !isCredentialField(input)) return;
   activeField = input;
   if (isUsernameField(input) && input.value) lastUsername = input.value;
-  showFieldToggle(input);
+  if (isUsernameField(input)) showFieldToggle(input);
+  else document.getElementById("leanvault-field-toggle")?.remove();
   showFieldMenu(input);
 }
 
@@ -91,7 +93,7 @@ function showFieldMenu(input: HTMLInputElement): void {
     glyph.textContent = "↗";
     button.append(icon, copy, glyph);
     button.addEventListener("pointerdown", (event) => event.preventDefault());
-    button.addEventListener("click", () => void fill(item.id, input, host));
+    button.addEventListener("click", () => void fill(item.id, input));
     choices.append(button);
   }
   if (input.type.toLowerCase() === "password") {
@@ -109,7 +111,7 @@ function showFieldMenu(input: HTMLInputElement): void {
 
 function showFieldToggle(input: HTMLInputElement): void {
   document.getElementById("leanvault-field-toggle")?.remove();
-  if (suggestions.length === 0 && input.type.toLowerCase() !== "password") return;
+  if (!isUsernameField(input) || suggestions.length === 0) return;
   const host = overlayHost("leanvault-field-toggle", input);
   const root = host.shadowRoot!;
   root.innerHTML = `<style>${styles}</style><button class="field-toggle" type="button" aria-label="Toggle LeanVault suggestions" aria-expanded="true" title="Show or hide LeanVault suggestions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="16" height="18" rx="3"/><path d="M3 7h3M3 17h3"/><circle cx="13" cy="12" r="5"/><circle cx="13" cy="12" r="1.7"/><path d="M13 7v1.5M13 15.5V17M8 12h1.5M16.5 12H18"/></svg></button>`;
@@ -156,7 +158,7 @@ function dismissOverlaysOnEscape(event: KeyboardEvent): void {
   }
 }
 
-async function fill(id: string, preferred: HTMLInputElement, host: HTMLElement): Promise<void> {
+async function fill(id: string, preferred: HTMLInputElement): Promise<void> {
   try {
     const data = await request({ type: "site.credential", id, url: location.href });
     if (data.type !== "siteCredential") return;
@@ -164,8 +166,7 @@ async function fill(id: string, preferred: HTMLInputElement, host: HTMLElement):
     const username = findUsernameField(password, preferred);
     setInputValue(username, data.username);
     setInputValue(password, data.password);
-    (password ?? username)?.focus();
-    closeFieldMenu(host);
+    closeFieldMenu();
   } catch (error) {
     showTransient(error instanceof Error ? error.message : "LeanVault could not fill this login.");
   }
@@ -427,7 +428,6 @@ function visible(input: HTMLInputElement): boolean {
 
 function setInputValue(input: HTMLInputElement | undefined, value: string): boolean {
   if (!input || !value) return false;
-  input.focus();
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
   try {
     input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
