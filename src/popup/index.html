@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LeanVault</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header class="app-header">
+        <div class="header-copy">
+          <span id="brand-mark" class="mark" aria-hidden="true">L</span>
+          <div class="brand">
+            <h1 id="app-title">LeanVault</h1>
+            <p id="subtitle">Lightweight Vaultwarden client</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="add-login" class="new-button" type="button" hidden><span aria-hidden="true">＋</span> New</button>
+          <button id="account-avatar" class="avatar-button" type="button" title="Open settings" aria-label="Open settings" hidden>LV</button>
+          <span id="state-pill" class="pill neutral">Starting</span>
+        </div>
+      </header>
+
+      <section id="setup-view" class="view auth-view" hidden>
+        <div>
+          <h2>Connect your server</h2>
+          <p class="detail">LeanVault requests access only to the server origin you choose.</p>
+        </div>
+        <form id="server-form">
+          <label for="server-url">Vaultwarden URL</label>
+          <input id="server-url" type="url" inputmode="url" autocomplete="url" placeholder="https://vault.example.com" required />
+          <button id="server-submit" type="submit">Verify server</button>
+        </form>
+      </section>
+
+      <section id="login-view" class="view auth-view" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>Sign in</h2>
+            <p id="server-detail" class="detail"></p>
+          </div>
+          <button id="change-server" class="link-button" type="button">Change</button>
+        </div>
+        <form id="login-form">
+          <label for="email">Email</label>
+          <input id="email" type="email" autocomplete="username" required />
+          <label for="master-password">Master password</label>
+          <input id="master-password" type="password" autocomplete="current-password" required />
+
+          <fieldset id="two-factor-fields" hidden>
+            <legend>Two-step login</legend>
+            <label for="two-factor-provider">Method</label>
+            <select id="two-factor-provider"></select>
+            <button id="send-email-code" class="secondary" type="button" hidden>Send email code</button>
+            <label for="two-factor-token">Verification code</label>
+            <input id="two-factor-token" inputmode="text" autocomplete="one-time-code" />
+            <label class="check-label"><input id="two-factor-remember" type="checkbox" /> Remember this device</label>
+          </fieldset>
+
+          <fieldset id="device-fields" hidden>
+            <legend>New device verification</legend>
+            <p class="detail">Enter the verification code sent by your server.</p>
+            <label for="device-otp">Device verification code</label>
+            <input id="device-otp" autocomplete="one-time-code" />
+          </fieldset>
+
+          <button id="login-submit" type="submit">Sign in and sync</button>
+        </form>
+      </section>
+
+      <section id="locked-view" class="view auth-view" hidden>
+        <div class="lock-hero" aria-hidden="true">●</div>
+        <div class="centered">
+          <h2>Vault locked</h2>
+          <p id="locked-account" class="detail"></p>
+        </div>
+        <form id="unlock-form">
+          <label for="unlock-password">Master password</label>
+          <input id="unlock-password" type="password" autocomplete="current-password" required />
+          <button id="unlock-submit" type="submit">Unlock</button>
+        </form>
+        <button id="locked-logout" class="secondary" type="button">Log out</button>
+      </section>
+
+      <section id="vault-view" class="view vault-view" hidden>
+        <div class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="search" type="search" autocomplete="off" placeholder="Search vault" aria-label="Search vault" />
+        </div>
+        <p id="vault-context" class="detail vault-context"></p>
+        <div id="item-list" class="item-list" role="list"></div>
+        <p id="empty-state" class="empty" hidden>No matching logins.</p>
+      </section>
+
+      <section id="generator-view" class="view utility-view" hidden>
+        <div class="page-intro">
+          <h2>Password generator</h2>
+          <p class="detail">Generated locally with the browser's cryptographic random source.</p>
+        </div>
+        <div class="generator-output-row">
+          <input id="generator-output" class="generator-output" readonly aria-label="Generated password" />
+          <button id="generator-copy" class="square-button" type="button" title="Copy password" aria-label="Copy generated password">⧉</button>
+        </div>
+        <div class="settings-card">
+          <div class="range-heading">
+            <label for="generator-length">Length</label>
+            <output id="generator-length-value" for="generator-length">22</output>
+          </div>
+          <input id="generator-length" type="range" min="8" max="64" value="22" />
+          <div class="option-grid">
+            <label class="check-label"><input id="generator-uppercase" type="checkbox" checked /> Uppercase</label>
+            <label class="check-label"><input id="generator-lowercase" type="checkbox" checked /> Lowercase</label>
+            <label class="check-label"><input id="generator-numbers" type="checkbox" checked /> Numbers</label>
+            <label class="check-label"><input id="generator-symbols" type="checkbox" checked /> Symbols</label>
+          </div>
+        </div>
+        <button id="generator-refresh" type="button">Generate another</button>
+        <button id="generator-use" class="secondary" type="button">Use in a new login</button>
+      </section>
+
+      <section id="settings-view" class="view utility-view" hidden>
+        <div class="settings-card">
+          <h2>Vault security</h2>
+          <label for="vault-timeout">Lock vault</label>
+          <select id="vault-timeout">
+            <option value="-1">Keep unlocked until logout</option>
+            <option value="0">When browser closes</option>
+            <option value="15">After 15 minutes</option>
+            <option value="60">After 1 hour</option>
+            <option value="240">After 4 hours</option>
+          </select>
+          <p class="detail">“Until logout” encrypts the session for this browser profile, but is less safe on a shared computer.</p>
+          <button id="lock" class="secondary" type="button">Lock now</button>
+        </div>
+        <div class="settings-card">
+          <div class="setting-row">
+            <div>
+              <h2>Website integration</h2>
+              <p class="detail">Autofill suggestions and save prompts.</p>
+            </div>
+            <button id="site-access" class="compact-button" type="button">Enable</button>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h2>Account</h2>
+          <p id="settings-account" class="setting-value"></p>
+          <p id="settings-server" class="detail truncate"></p>
+          <p id="app-version" class="detail"></p>
+          <div class="settings-actions">
+            <button id="sync" class="secondary" type="button">Sync now</button>
+            <button id="logout" class="danger-button" type="button">Log out</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="detail-view" class="view detail-view" hidden>
+        <button id="detail-back" class="link-button back" type="button">← Back to vault</button>
+        <div>
+          <h2 id="detail-name"></h2>
+          <p id="detail-uri" class="detail truncate"></p>
+        </div>
+        <div class="secret-row">
+          <div><span class="label">Username</span><span id="detail-username" class="secret truncate"></span></div>
+          <button id="copy-username" class="small-button" type="button">Copy</button>
+        </div>
+        <form id="reprompt-form" class="reprompt" hidden>
+          <p class="detail">This login requires your master password before protected fields can be used.</p>
+          <label for="reprompt-password">Master password</label>
+          <input id="reprompt-password" type="password" autocomplete="current-password" required />
+          <button id="reprompt-submit" type="submit">Unlock protected fields</button>
+        </form>
+        <div id="password-row" class="secret-row">
+          <div><span class="label">Password</span><span id="detail-password" class="secret password-mask"></span></div>
+          <div class="button-pair">
+            <button id="reveal-password" class="small-button" type="button">Show</button>
+            <button id="copy-password" class="small-button" type="button">Copy</button>
+          </div>
+        </div>
+        <div id="totp-row" class="secret-row" hidden>
+          <div><span class="label">Authenticator code</span><span id="detail-totp" class="secret"></span></div>
+          <button id="copy-totp" class="small-button" type="button">Copy</button>
+        </div>
+        <button id="fill-detail" type="button">Fill on this page</button>
+        <button id="edit-login" class="secondary" type="button">Edit login</button>
+      </section>
+
+      <section id="editor-view" class="view detail-view" hidden>
+        <button id="editor-back" class="link-button back" type="button">← Back</button>
+        <h2 id="editor-title">Add login</h2>
+        <form id="editor-form">
+          <label for="login-name">Name</label>
+          <input id="login-name" maxlength="1000" required />
+          <label for="login-username">Username</label>
+          <input id="login-username" maxlength="1000" autocomplete="off" />
+          <label for="login-password">Password</label>
+          <div class="inline-field">
+            <input id="login-password" type="text" maxlength="10000" autocomplete="off" />
+            <button id="generate-password" class="small-button" type="button">Generate</button>
+          </div>
+          <label for="login-uri">Website</label>
+          <input id="login-uri" type="url" maxlength="8192" placeholder="https://example.com" />
+          <label for="login-notes">Notes</label>
+          <textarea id="login-notes" maxlength="10000" rows="3"></textarea>
+          <label class="check-label"><input id="login-favorite" type="checkbox" /> Favorite</label>
+          <button id="editor-submit" type="submit">Save login</button>
+        </form>
+      </section>
+
+      <nav id="bottom-nav" class="bottom-nav" aria-label="Main navigation" hidden>
+        <button id="nav-vault" class="nav-button active" type="button"><span aria-hidden="true">▣</span><span>Vault</span></button>
+        <button id="nav-generator" class="nav-button" type="button"><span aria-hidden="true">✦</span><span>Generator</span></button>
+      </nav>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="index.js"></script>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "lean-vault-extension",
+  "version": "0.4.0",
+  "private": true,
+  "description": "A lightweight, open-source browser extension for Vaultwarden-compatible servers.",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/jsjain/vaultwarden-chrome-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jsjain/vaultwarden-chrome-extension/issues"
+  },
+  "homepage": "https://github.com/jsjain/vaultwarden-chrome-extension#readme",
+  "keywords": ["vaultwarden", "password-manager", "chrome-extension", "manifest-v3"],
+  "packageManager": "pnpm@11.18.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:dist": "node scripts/validate-dist.mjs",
+    "check:size": "node scripts/check-size.mjs",
+    "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm check:dist && pnpm check:size"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.2.5",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "hash-wasm": "4.12.0"
+  }
+}
