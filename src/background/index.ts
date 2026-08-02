@@ -8,7 +8,16 @@ import {
 } from "../shared/messages";
 import { readAuthSession, writeAuthSession, writeServerSnapshot } from "../shared/storage";
 import type { ServerSnapshot } from "../shared/storage-types";
-import { readVaultTimeoutMinutes, writeVaultTimeoutMinutes } from "../shared/settings";
+import {
+  isUrlExcluded,
+  readBrowserIntegrationOptions,
+  readGeneratorOptions,
+  readVaultTimeoutMinutes,
+  writeBrowserIntegrationOptions,
+  writeGeneratorOptions,
+  writeVaultTimeoutMinutes,
+} from "../shared/settings";
+import { generatePassword } from "../crypto/password-generator";
 import { VaultController } from "./vault-controller";
 import { configureSiteIntegration, restoreSiteIntegration, siteIntegrationEnabled } from "./site-integration";
 import { isAutoLockAlarm, touchAutoLock } from "./auto-lock";
@@ -104,33 +113,50 @@ async function dispatch(request: ExtensionRequest, sender: chrome.runtime.Messag
       if (session) await writeAuthSession(session);
       return currentSettings();
       }
+    case "settings.browserOptions":
+      await writeBrowserIntegrationOptions(request.options);
+      return currentSettings();
+    case "settings.generator":
+      await writeGeneratorOptions(request.options);
+      return currentSettings();
     case "site.suggestions": {
       await requireSiteIntegrationEnabled();
       requireSiteSender(sender, request.url);
+      await requireSiteAllowed(request.url);
       return { type: "siteSuggestions", items: await controller.siteSuggestions(request.url) };
     }
     case "site.credential": {
       await requireSiteIntegrationEnabled();
       requireSiteSender(sender, request.url);
+      await requireSiteAllowed(request.url);
       return { type: "siteCredential", ...(await controller.siteCredential(request.id, request.url)) };
     }
     case "site.inspect": {
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender, request.url);
+      const options = await requireSiteAllowed(request.url);
       return {
         type: "sitePrompt",
-        prompt: await controller.inspectSiteLogin(tabId, request.url, request.username, request.password),
+        prompt: await controller.inspectSiteLogin(tabId, request.url, request.username, request.password, options),
       };
     }
     case "site.pendingPrompt": {
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender);
+      await requireSiteAllowed(sender.url!);
       return { type: "sitePrompt", prompt: controller.pendingSitePrompt(tabId) };
+    }
+    case "site.generatePassword": {
+      await requireSiteIntegrationEnabled();
+      requireSiteSender(sender, request.url);
+      await requireSiteAllowed(request.url);
+      return { type: "generatedPassword", password: generatePassword(await readGeneratorOptions()) };
     }
     case "site.save": {
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender);
-      await controller.savePendingSiteLogin(tabId, request.promptId);
+      await requireSiteAllowed(sender.url!);
+      await controller.savePendingSiteLogin(tabId, request.promptId, request.login);
       return { type: "done" };
     }
     case "site.dismiss": {
@@ -143,15 +169,23 @@ async function dispatch(request: ExtensionRequest, sender: chrome.runtime.Messag
 }
 
 async function currentSettings(): Promise<Extract<ResponseData, { type: "settings" }>> {
-  const [integration, vaultTimeoutMinutes] = await Promise.all([
+  const [integration, vaultTimeoutMinutes, browserOptions, generatorOptions] = await Promise.all([
     siteIntegrationEnabled(),
     readVaultTimeoutMinutes(),
+    readBrowserIntegrationOptions(),
+    readGeneratorOptions(),
   ]);
-  return { type: "settings", siteIntegrationEnabled: integration, vaultTimeoutMinutes };
+  return { type: "settings", siteIntegrationEnabled: integration, vaultTimeoutMinutes, browserOptions, generatorOptions };
 }
 
 async function requireSiteIntegrationEnabled(): Promise<void> {
   if (!(await siteIntegrationEnabled())) throw new Error("Website integration is disabled.");
+}
+
+async function requireSiteAllowed(url: string) {
+  const options = await readBrowserIntegrationOptions();
+  if (isUrlExcluded(url, options)) throw new Error("LeanVault is disabled for this domain.");
+  return options;
 }
 
 function requireSiteSender(sender: chrome.runtime.MessageSender, requestedUrl?: string): number {

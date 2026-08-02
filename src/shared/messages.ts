@@ -1,7 +1,14 @@
 import type { ServerSnapshot } from "./storage-types";
 import type { VaultItemDetail, VaultItemSummary } from "../vault/models";
 import type { LoginWriteInput } from "../vault/encrypt-login";
-import { isVaultTimeoutMinutes, type VaultTimeoutMinutes } from "./settings";
+import {
+  isBrowserIntegrationOptions,
+  isGeneratorOptions,
+  isVaultTimeoutMinutes,
+  type BrowserIntegrationOptions,
+  type StoredGeneratorOptions,
+  type VaultTimeoutMinutes,
+} from "./settings";
 
 export type { ServerSnapshot } from "./storage-types";
 
@@ -60,11 +67,14 @@ export type ExtensionRequest =
   | { type: "settings.get" }
   | { type: "settings.siteIntegration"; enabled: boolean }
   | { type: "settings.vaultTimeout"; minutes: VaultTimeoutMinutes }
+  | { type: "settings.browserOptions"; options: BrowserIntegrationOptions }
+  | { type: "settings.generator"; options: StoredGeneratorOptions }
   | { type: "site.suggestions"; url: string }
   | { type: "site.credential"; id: string; url: string }
   | { type: "site.inspect"; url: string; username: string; password: string }
   | { type: "site.pendingPrompt" }
-  | { type: "site.save"; promptId: string }
+  | { type: "site.generatePassword"; url: string }
+  | { type: "site.save"; promptId: string; login?: LoginWriteInput }
   | { type: "site.dismiss"; promptId: string };
 
 export type ResponseData =
@@ -92,10 +102,16 @@ export type ResponseData =
       type: "settings";
       siteIntegrationEnabled: boolean;
       vaultTimeoutMinutes: VaultTimeoutMinutes;
+      browserOptions: BrowserIntegrationOptions;
+      generatorOptions: StoredGeneratorOptions;
     }
   | { type: "siteSuggestions"; items: VaultItemSummary[] }
   | { type: "siteCredential"; username: string; password: string }
-  | { type: "sitePrompt"; prompt: { id: string; action: "save" | "update"; name: string } | null };
+  | { type: "generatedPassword"; password: string }
+  | {
+      type: "sitePrompt";
+      prompt: ({ id: string; action: "save" | "update" } & LoginWriteInput) | null;
+    };
 
 export type ExtensionResponse = { ok: true; data: ResponseData } | { ok: false; error: string };
 
@@ -154,6 +170,10 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
       return typeof request.enabled === "boolean";
     case "settings.vaultTimeout":
       return isVaultTimeoutMinutes(request.minutes);
+    case "settings.browserOptions":
+      return isBrowserIntegrationOptions(request.options);
+    case "settings.generator":
+      return isGeneratorOptions(request.options);
     case "site.suggestions":
       return boundedString(request.url, 8_192);
     case "site.credential":
@@ -164,7 +184,10 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
         optionalString(request.username, 1_000) &&
         boundedString(request.password, 10_000)
       );
+    case "site.generatePassword":
+      return boundedString(request.url, 8_192);
     case "site.save":
+      return boundedString(request.promptId, 128) && (request.login === undefined || validLogin(request.login));
     case "site.dismiss":
       return boundedString(request.promptId, 128);
     default:

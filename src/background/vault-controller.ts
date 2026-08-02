@@ -37,6 +37,7 @@ import {
   type LoginWriteInput,
 } from "../vault/encrypt-login";
 import { fillActiveTab } from "./fill";
+import type { BrowserIntegrationOptions } from "../shared/settings";
 
 export class VaultController {
   private readonly client = new VaultwardenClient();
@@ -337,14 +338,24 @@ export class VaultController {
     url: string,
     username: string,
     password: string,
-  ): Promise<{ id: string; action: "save" | "update"; name: string } | null> {
+    options: BrowserIntegrationOptions,
+  ): Promise<({ id: string; action: "save" | "update" } & LoginWriteInput) | null> {
     const matches = (await this.requireVault()).filter((item) => matchesCurrentUrl(item, url));
     if (matches.some((item) => item.username === username && item.password === password)) return null;
     const update = matches.find(
       (item) => item.username === username && !item.organizationId && !item.reprompt,
     );
+    if (update && !options.askUpdateLogin) return null;
+    if (!update && !options.askAddLogin) return null;
     const name = update?.name ?? new URL(url).hostname.replace(/^www\./, "");
-    const prompt = { id: crypto.randomUUID(), action: update ? "update" as const : "save" as const, name };
+    const prompt = {
+      id: crypto.randomUUID(),
+      action: update ? "update" as const : "save" as const,
+      name,
+      username,
+      password,
+      uri: url,
+    };
     this.pendingCaptures.set(tabId, {
       ...prompt,
       url,
@@ -362,17 +373,24 @@ export class VaultController {
       this.pendingCaptures.delete(tabId);
       return null;
     }
-    return { id: pending.id, action: pending.action, name: pending.name };
+    return {
+      id: pending.id,
+      action: pending.action,
+      name: pending.name,
+      username: pending.username,
+      password: pending.password,
+      uri: pending.url,
+    };
   }
 
-  async savePendingSiteLogin(tabId: number, promptId: string): Promise<void> {
+  async savePendingSiteLogin(tabId: number, promptId: string, edited?: LoginWriteInput): Promise<void> {
     const pending = this.pendingCaptures.get(tabId);
     if (!pending || pending.id !== promptId || pending.expiresAt <= Date.now()) {
       this.pendingCaptures.delete(tabId);
       throw new Error("The save prompt expired. Submit the login form again.");
     }
     this.pendingCaptures.delete(tabId);
-    const input = {
+    const input: LoginWriteInput = edited ?? {
       name: pending.name,
       username: pending.username,
       password: pending.password,

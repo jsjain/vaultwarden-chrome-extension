@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { isExtensionRequest } from "../src/shared/messages";
-import { isVaultTimeoutMinutes } from "../src/shared/settings";
+import {
+  isUrlExcluded,
+  isVaultTimeoutMinutes,
+  normalizeBrowserIntegrationOptions,
+  normalizeGeneratorOptions,
+} from "../src/shared/settings";
 
 describe("vault timeout settings", () => {
   it("accepts only supported timeout values", () => {
@@ -13,5 +18,30 @@ describe("vault timeout settings", () => {
   it("validates vault-timeout runtime messages", () => {
     expect(isExtensionRequest({ type: "settings.vaultTimeout", minutes: -1 })).toBe(true);
     expect(isExtensionRequest({ type: "settings.vaultTimeout", minutes: 30 })).toBe(false);
+  });
+});
+
+describe("browser integration settings", () => {
+  it("normalizes and matches excluded domains including subdomains", () => {
+    const options = normalizeBrowserIntegrationOptions({
+      askAddLogin: false,
+      askUpdateLogin: true,
+      excludedDomains: ["https://www.Example.com/path", "example.com", ""],
+    });
+    expect(options).toEqual({ askAddLogin: false, askUpdateLogin: true, excludedDomains: ["example.com"] });
+    expect(isUrlExcluded("https://accounts.example.com/login", options)).toBe(true);
+    expect(isUrlExcluded("https://notexample.com/login", options)).toBe(false);
+  });
+
+  it("validates browser and generator preference messages", () => {
+    expect(isExtensionRequest({
+      type: "settings.browserOptions",
+      options: { askAddLogin: true, askUpdateLogin: true, excludedDomains: ["example.com"] },
+    })).toBe(true);
+    expect(isExtensionRequest({
+      type: "settings.generator",
+      options: { length: 22, uppercase: true, lowercase: true, numbers: true, symbols: true },
+    })).toBe(true);
+    expect(normalizeGeneratorOptions({ length: 2 })).toMatchObject({ length: 22 });
   });
 });

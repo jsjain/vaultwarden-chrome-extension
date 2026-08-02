@@ -25,16 +25,17 @@ Vaultwarden provides a resource-efficient, self-hosted implementation of the Bit
 server API. LeanVault applies the same lightweight idea to the browser client: a small extension,
 limited runtime permissions, no analytics, and independently loaded cryptography only when needed.
 
-Version **0.4.0** currently provides:
+Version **0.5.0** currently provides:
 
 - Custom Vaultwarden server URLs, including reverse-proxy subpaths.
 - PBKDF2 and Bitwarden-compatible Argon2id authentication.
 - Common code-based two-step login challenges.
 - Encrypted vault sync and authenticated login decryption.
-- Fast vault search, current-site suggestions, website favicons, copy, and manual fill.
+- Fast vault search, field-anchored current-site suggestions, website favicons, copy, open-site,
+  and iframe/open-shadow-root manual fill.
 - Encrypted personal-login creation and editing with website mapping.
-- A local cryptographic password generator.
-- Optional website autofill and explicit save/update prompts.
+- A local cryptographic password generator whose preferences are shared with website fields.
+- Optional website autofill, editable save/update prompts, and excluded-domain controls.
 - Master-password reprompt handling and organization `ViewPassword` enforcement.
 - Configurable locking: browser close, inactivity timeout, or encrypted device persistence until
   explicit lock/logout.

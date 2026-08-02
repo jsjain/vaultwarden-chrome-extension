@@ -10,6 +10,7 @@
     <main>
       <header class="app-header">
         <div class="header-copy">
+          <button id="header-back" class="header-back" type="button" aria-label="Back to vault" title="Back to vault" hidden>←</button>
           <span id="brand-mark" class="mark" aria-hidden="true">L</span>
           <div class="brand">
             <h1 id="app-title">LeanVault</h1>
@@ -144,6 +145,21 @@
           </div>
         </div>
         <div class="settings-card">
+          <h2>Save to vault options</h2>
+          <label class="check-label disabled-option"><input type="checkbox" disabled /> Ask to save and use passkeys <span class="beta-note">Later</span></label>
+          <label class="check-label"><input id="ask-add-login" type="checkbox" /> Ask to add login</label>
+          <label class="check-label"><input id="ask-update-login" type="checkbox" /> Ask to update existing login</label>
+        </div>
+        <div class="settings-card">
+          <h2>Excluded domains</h2>
+          <p class="detail">LeanVault will not suggest, fill, or save credentials on these domains.</p>
+          <form id="excluded-domain-form" class="inline-field">
+            <input id="excluded-domain" inputmode="url" autocomplete="off" placeholder="example.com" />
+            <button class="small-button" type="submit">Add</button>
+          </form>
+          <div id="excluded-domain-list" class="excluded-domain-list"></div>
+        </div>
+        <div class="settings-card">
           <h2>Account</h2>
           <p id="settings-account" class="setting-value"></p>
           <p id="settings-server" class="detail truncate"></p>
@@ -156,7 +172,6 @@
       </section>
 
       <section id="detail-view" class="view detail-view" hidden>
-        <button id="detail-back" class="link-button back" type="button">← Back to vault</button>
         <div>
           <h2 id="detail-name"></h2>
           <p id="detail-uri" class="detail truncate"></p>
@@ -187,7 +202,6 @@
       </section>
 
       <section id="editor-view" class="view detail-view" hidden>
-        <button id="editor-back" class="link-button back" type="button">← Back</button>
         <h2 id="editor-title">Add login</h2>
         <form id="editor-form">
           <label for="login-name">Name</label>
@@ -209,8 +223,8 @@
       </section>
 
       <nav id="bottom-nav" class="bottom-nav" aria-label="Main navigation" hidden>
-        <button id="nav-vault" class="nav-button active" type="button"><span aria-hidden="true">▣</span><span>Vault</span></button>
-        <button id="nav-generator" class="nav-button" type="button"><span aria-hidden="true">✦</span><span>Generator</span></button>
+        <button id="nav-vault" class="nav-button active" type="button"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/><path d="m7.9 7.9 2.7 2.7"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/><path d="m13.4 10.6 2.7-2.7"/><circle cx="7.5" cy="16.5" r=".5" fill="currentColor"/><path d="m7.9 16.1 2.7-2.7"/><circle cx="16.5" cy="16.5" r=".5" fill="currentColor"/><path d="m13.4 13.4 2.7 2.7"/><circle cx="12" cy="12" r="2"/></svg><span>Vault</span></button>
+        <button id="nav-generator" class="nav-button" type="button"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16h.01"/><path d="M16 16h.01"/><path d="M3 19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5a.5.5 0 0 0-.769-.422l-4.462 2.844A.5.5 0 0 1 15 10.5v-2a.5.5 0 0 0-.769-.422L9.77 10.922A.5.5 0 0 1 9 10.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z"/><path d="M8 16h.01"/></svg><span>Generator</span></button>
       </nav>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>

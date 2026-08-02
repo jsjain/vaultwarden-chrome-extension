@@ -56,6 +56,16 @@ main {
 }
 .header-copy { min-width: 0; }
 .header-actions { flex: none; }
+.header-back {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-color: var(--border);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 20px;
+}
 .brand { min-width: 0; }
 .mark {
   display: grid;
@@ -258,6 +268,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .generator-output { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .range-heading output { min-width: 30px; padding: 3px 7px; border-radius: 7px; background: var(--surface-strong); text-align: center; font-size: 11px; }
 .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.disabled-option { color: var(--muted); }
+.beta-note { margin-left: auto; color: var(--muted); font-size: 9px; font-weight: 600; }
+.excluded-domain-list { display: grid; gap: 6px; }
+.excluded-domain-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: #151a23; font-size: 11px; }
+.excluded-domain-row span { min-width: 0; flex: 1; }
 
 .secret-row { min-height: 58px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .reprompt { padding: 11px; border: 1px solid #75663c; border-radius: 10px; background: #292619; }
@@ -285,7 +300,7 @@ button:disabled { cursor: wait; opacity: .6; }
   color: var(--muted);
   font-size: 10px;
 }
-.nav-button span:first-child { font-size: 20px; line-height: 1; }
+.nav-icon { width: 21px; height: 21px; }
 .nav-button:hover { background: #1b202c; }
 .nav-button.active { color: var(--text); }
 

@@ -6,7 +6,14 @@ import type {
   PublicAppState,
   ResponseData,
 } from "../shared/messages";
-import { isVaultTimeoutMinutes, type VaultTimeoutMinutes } from "../shared/settings";
+import {
+  DEFAULT_BROWSER_INTEGRATION_OPTIONS,
+  DEFAULT_GENERATOR_OPTIONS,
+  isVaultTimeoutMinutes,
+  type BrowserIntegrationOptions,
+  type StoredGeneratorOptions,
+  type VaultTimeoutMinutes,
+} from "../shared/settings";
 import type { VaultItemDetail, VaultItemSummary } from "../vault/models";
 
 const views = {
@@ -20,6 +27,7 @@ const views = {
   editor: element<HTMLElement>("editor-view"),
 };
 const appTitle = element<HTMLHeadingElement>("app-title");
+const headerBack = element<HTMLButtonElement>("header-back");
 const brandMark = element<HTMLSpanElement>("brand-mark");
 const statePill = element<HTMLSpanElement>("state-pill");
 const subtitle = element<HTMLParagraphElement>("subtitle");
@@ -86,13 +94,21 @@ const generatorUppercase = element<HTMLInputElement>("generator-uppercase");
 const generatorLowercase = element<HTMLInputElement>("generator-lowercase");
 const generatorNumbers = element<HTMLInputElement>("generator-numbers");
 const generatorSymbols = element<HTMLInputElement>("generator-symbols");
+const askAddLogin = element<HTMLInputElement>("ask-add-login");
+const askUpdateLogin = element<HTMLInputElement>("ask-update-login");
+const excludedDomainForm = element<HTMLFormElement>("excluded-domain-form");
+const excludedDomain = element<HTMLInputElement>("excluded-domain");
+const excludedDomainList = element<HTMLDivElement>("excluded-domain-list");
 
 let currentUrl: string | undefined;
 let selectedItem: VaultItemDetail | null = null;
 let editingId: string | null = null;
 let siteIntegrationEnabled = false;
 let vaultTimeoutMinutes: VaultTimeoutMinutes = 0;
+let browserOptions: BrowserIntegrationOptions = { ...DEFAULT_BROWSER_INTEGRATION_OPTIONS };
+let generatorOptions: StoredGeneratorOptions = { ...DEFAULT_GENERATOR_OPTIONS };
 let totalItems = 0;
+let currentView: keyof typeof views = "setup";
 
 void initialize().catch(showError);
 
@@ -134,8 +150,16 @@ navGenerator.addEventListener("click", () => {
 siteAccess.addEventListener("click", () => void toggleSiteIntegration());
 vaultTimeout.addEventListener("change", () => void updateVaultTimeout());
 editLogin.addEventListener("click", () => selectedItem && openEditor(selectedItem));
-element("editor-back").addEventListener("click", () => {
-  editingId ? void showDetail(editingId) : showView("vault");
+headerBack.addEventListener("click", () => {
+  if (currentView === "editor" && editingId) {
+    const id = editingId;
+    editingId = null;
+    void showDetail(id);
+    return;
+  }
+  editingId = null;
+  selectedItem = null;
+  showView("vault");
 });
 element("generate-password").addEventListener("click", () => {
   loginPassword.value = defaultGeneratedPassword();
@@ -159,10 +183,13 @@ for (const input of [
   generatorSymbols,
 ]) {
   input.addEventListener("input", refreshGeneratedPassword);
+  input.addEventListener("change", () => void persistGeneratorOptions());
 }
-element("detail-back").addEventListener("click", () => {
-  selectedItem = null;
-  showView("vault");
+askAddLogin.addEventListener("change", () => void updateBrowserOptions());
+askUpdateLogin.addEventListener("change", () => void updateBrowserOptions());
+excludedDomainForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void addExcludedDomain();
 });
 fillDetail.addEventListener("click", () => selectedItem && void fill(selectedItem.id));
 element("copy-username").addEventListener("click", () =>
@@ -183,8 +210,8 @@ search.addEventListener("input", () => void loadItems());
 async function initialize(): Promise<void> {
   appVersion.textContent = `LeanVault ${chrome.runtime.getManifest().version}`;
   currentUrl = await activeTabUrl();
-  refreshGeneratedPassword();
   await refreshSettings();
+  refreshGeneratedPassword();
   await refreshState();
 }
 
@@ -193,7 +220,17 @@ async function refreshSettings(): Promise<void> {
   if (data.type !== "settings") return;
   siteIntegrationEnabled = data.siteIntegrationEnabled;
   vaultTimeoutMinutes = data.vaultTimeoutMinutes;
+  browserOptions = data.browserOptions;
+  generatorOptions = data.generatorOptions;
   vaultTimeout.value = String(vaultTimeoutMinutes);
+  askAddLogin.checked = browserOptions.askAddLogin;
+  askUpdateLogin.checked = browserOptions.askUpdateLogin;
+  generatorLength.value = String(generatorOptions.length);
+  generatorUppercase.checked = generatorOptions.uppercase;
+  generatorLowercase.checked = generatorOptions.lowercase;
+  generatorNumbers.checked = generatorOptions.numbers;
+  generatorSymbols.checked = generatorOptions.symbols;
+  renderExcludedDomains();
   updateSiteAccessButton();
 }
 
@@ -208,10 +245,78 @@ async function toggleSiteIntegration(): Promise<void> {
     if (data.type !== "settings") throw new Error("The background worker returned invalid settings.");
     siteIntegrationEnabled = data.siteIntegrationEnabled;
     vaultTimeoutMinutes = data.vaultTimeoutMinutes;
+    browserOptions = data.browserOptions;
+    generatorOptions = data.generatorOptions;
     updateSiteAccessButton();
     showStatus(siteIntegrationEnabled ? "Website autofill and save prompts enabled." : "Website prompts disabled.", "success");
   } catch (error) {
     showError(error);
+  }
+}
+
+async function updateBrowserOptions(next?: BrowserIntegrationOptions): Promise<void> {
+  const previous = browserOptions;
+  const options = next ?? {
+    ...browserOptions,
+    askAddLogin: askAddLogin.checked,
+    askUpdateLogin: askUpdateLogin.checked,
+  };
+  try {
+    const data = await request({ type: "settings.browserOptions", options });
+    if (data.type !== "settings") throw new Error("The background worker returned invalid settings.");
+    browserOptions = data.browserOptions;
+    askAddLogin.checked = browserOptions.askAddLogin;
+    askUpdateLogin.checked = browserOptions.askUpdateLogin;
+    renderExcludedDomains();
+    showStatus("Save-to-vault preferences updated.", "success");
+  } catch (error) {
+    browserOptions = previous;
+    askAddLogin.checked = previous.askAddLogin;
+    askUpdateLogin.checked = previous.askUpdateLogin;
+    showError(error);
+  }
+}
+
+async function addExcludedDomain(): Promise<void> {
+  const value = normalizeExcludedDomain(excludedDomain.value);
+  if (!value) {
+    showError(new Error("Enter a valid domain such as example.com."));
+    return;
+  }
+  const options = { ...browserOptions, excludedDomains: [...new Set([...browserOptions.excludedDomains, value])] };
+  excludedDomain.value = "";
+  await updateBrowserOptions(options);
+}
+
+function renderExcludedDomains(): void {
+  excludedDomainList.replaceChildren();
+  for (const domain of browserOptions.excludedDomains) {
+    const row = document.createElement("div");
+    row.className = "excluded-domain-row";
+    const label = document.createElement("span");
+    label.className = "truncate";
+    label.textContent = domain;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "small-button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      void updateBrowserOptions({
+        ...browserOptions,
+        excludedDomains: browserOptions.excludedDomains.filter((item) => item !== domain),
+      });
+    });
+    row.append(label, remove);
+    excludedDomainList.append(row);
+  }
+}
+
+function normalizeExcludedDomain(value: string): string {
+  try {
+    const url = new URL(value.includes("://") ? value : `https://${value}`);
+    return url.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
   }
 }
 
@@ -496,6 +601,7 @@ function createItemRow(item: VaultItemSummary): HTMLElement {
     );
     actions.append(fillButton);
   }
+  if (item.uri) actions.append(rowIconButton("↗", "Open website", () => void openWebsite(item.uri!)));
   actions.append(rowIconButton("⧉", "Copy password", () => void copyItemPassword(item.id)));
 
   const menu = document.createElement("div");
@@ -514,6 +620,17 @@ function createItemRow(item: VaultItemSummary): HTMLElement {
   );
   row.append(icon, main, actions, menu);
   return row;
+}
+
+async function openWebsite(uri: string): Promise<void> {
+  try {
+    const url = new URL(uri);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("This login does not have a web address.");
+    await chrome.tabs.create({ url: url.href });
+    window.close();
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function siteFavicon(uri?: string): HTMLImageElement | null {
@@ -689,12 +806,29 @@ function suggestedSiteName(): string {
 
 function defaultGeneratedPassword(): string {
   return generatePassword({
-    length: 22,
-    uppercase: true,
-    lowercase: true,
-    numbers: true,
-    symbols: true,
+    length: Number(generatorLength.value),
+    uppercase: generatorUppercase.checked,
+    lowercase: generatorLowercase.checked,
+    numbers: generatorNumbers.checked,
+    symbols: generatorSymbols.checked,
   });
+}
+
+async function persistGeneratorOptions(): Promise<void> {
+  const options = {
+    length: Number(generatorLength.value),
+    uppercase: generatorUppercase.checked,
+    lowercase: generatorLowercase.checked,
+    numbers: generatorNumbers.checked,
+    symbols: generatorSymbols.checked,
+  };
+  try {
+    const data = await request({ type: "settings.generator", options });
+    if (data.type !== "settings") throw new Error("The background worker returned invalid settings.");
+    generatorOptions = data.generatorOptions;
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function refreshGeneratedPassword(): void {
@@ -899,6 +1033,7 @@ async function request(value: ExtensionRequest): Promise<ResponseData> {
 }
 
 function showView(name: keyof typeof views): void {
+  currentView = name;
   for (const [key, view] of Object.entries(views)) {
     view.hidden = key !== name;
   }
@@ -910,6 +1045,7 @@ function showView(name: keyof typeof views): void {
   accountAvatar.hidden = !unlockedView;
   statePill.hidden = unlockedView;
   brandMark.hidden = unlockedView;
+  headerBack.hidden = name !== "detail" && name !== "editor";
   subtitle.hidden = unlockedView;
   navVault.classList.toggle("active", name === "vault");
   navGenerator.classList.toggle("active", name === "generator");

@@ -26,7 +26,7 @@
 
 - [x] Personal login cipher create/update with per-item encryption keys and URI checksums.
 - [ ] Folder support and cipher delete/restore.
-- [x] Click-only manual autofill for top-frame username/password fields.
+- [x] Click-only manual autofill across page frames and open shadow roots.
 - [ ] Shortcut and context-menu autofill.
 - [x] Standard TOTP generation without exposing seeds to the popup.
 - [ ] Cards, identities, secure notes, and custom fields.
@@ -37,8 +37,8 @@
 
 ## Milestone 4 — advanced browser integration
 
-- [x] Lightweight matched-login picker and bounded top-frame form observation.
-- [ ] SPA, iframe, shadow DOM, and HTTP downgrade handling.
+- [x] Field-anchored matched-login picker and dynamic form observation.
+- [x] SPA, iframe manual fill, open-shadow-DOM detection, and HTTP downgrade handling.
 - [ ] Passkey create/get bridge with RP ID and origin validation.
 - [ ] Basic-auth handling and adaptive notification sync.
 - [ ] Attachments, Send, import/export, organizations, and collections.
