@@ -110,7 +110,7 @@ export type ResponseData =
   | { type: "generatedPassword"; password: string }
   | {
       type: "sitePrompt";
-      prompt: ({ id: string; action: "save" | "update" } & LoginWriteInput) | null;
+      prompt: ({ id: string; expiresAt: number; action: "save" | "update" } & LoginWriteInput) | null;
     };
 
 export type ExtensionResponse = { ok: true; data: ResponseData } | { ok: false; error: string };

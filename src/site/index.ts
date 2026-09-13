@@ -1,14 +1,19 @@
 import type { ExtensionRequest, ExtensionResponse, ResponseData } from "../shared/messages";
 import type { LoginWriteInput } from "../vault/encrypt-login";
+import { canBeUsernameField, looksLikeUsernameField } from "./field-detection";
 
 type Suggestion = Extract<ResponseData, { type: "siteSuggestions" }>["items"][number];
 type SitePrompt = NonNullable<Extract<ResponseData, { type: "sitePrompt" }>["prompt"]>;
 
 const marker = "data-leanvault-loaded";
 let suggestions: Suggestion[] = [];
+let suggestionsUrl = "";
+let suggestionsLoad: Promise<void> | null = null;
 let lastUsername = "";
 let lastCapture = "";
 let activeField: HTMLInputElement | null = null;
+let activeFieldKind: "username" | "password" | null = null;
+let activeSavePromptId: string | null = null;
 let dismissActiveSavePrompt: (() => void) | null = null;
 
 if (!document.documentElement.hasAttribute(marker)) {
@@ -17,6 +22,9 @@ if (!document.documentElement.hasAttribute(marker)) {
 }
 
 async function initialize(): Promise<void> {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.accountMetadata) suggestionsUrl = "";
+  });
   document.addEventListener("focusin", handleFocus, true);
   document.addEventListener("input", rememberInput, true);
   document.addEventListener("submit", captureLogin, true);
@@ -26,36 +34,83 @@ async function initialize(): Promise<void> {
   document.addEventListener("keydown", dismissOverlaysOnEscape, true);
   window.addEventListener("scroll", repositionOpenOverlay, true);
   window.addEventListener("resize", repositionOpenOverlay);
-  try {
-    const [matches, pending] = await Promise.all([
-      request({ type: "site.suggestions", url: location.href }),
-      request({ type: "site.pendingPrompt" }),
-    ]);
-    if (matches.type === "siteSuggestions") suggestions = matches.items;
-    if (pending.type === "sitePrompt" && pending.prompt) renderSavePrompt(pending.prompt);
-    const focused = deepActiveInput();
-    if (focused && isCredentialField(focused)) {
-      activeField = focused;
-      if (isUsernameField(focused)) showFieldToggle(focused);
-      else document.getElementById("leanvault-field-toggle")?.remove();
-      showFieldMenu(focused);
-    }
-  } catch {
-    // Locked, excluded, and signed-out vaults stay silent on the page.
+  observeDynamicCredentialFields();
+  const [, pending] = await Promise.allSettled([
+    loadSuggestions(),
+    request({ type: "site.pendingPrompt" }),
+  ]);
+  if (pending.status === "fulfilled" && pending.value.type === "sitePrompt" && pending.value.prompt) {
+    renderSavePrompt(pending.value.prompt);
   }
+  const focused = deepActiveInput();
+  if (focused && isCredentialField(focused)) activateField(focused);
 }
 
 function handleFocus(event: FocusEvent): void {
+  if (event.composedPath().some((target) => target instanceof Element && isExtensionElement(target))) return;
   const input = event.composedPath().find((target) => target instanceof HTMLInputElement);
   if (!(input instanceof HTMLInputElement) || !isCredentialField(input)) return;
+  activateField(input);
+}
+
+function activateField(input: HTMLInputElement): void {
   activeField = input;
+  activeFieldKind = input.type.toLowerCase() === "password" ? "password" : "username";
   if (isUsernameField(input) && input.value) lastUsername = input.value;
-  if (isUsernameField(input)) showFieldToggle(input);
-  else document.getElementById("leanvault-field-toggle")?.remove();
-  showFieldMenu(input);
+  void loadSuggestions().then(() => {
+    if (activeField !== input || !input.isConnected || !isCredentialField(input)) return;
+    if (isUsernameField(input)) showFieldToggle(input);
+    else document.getElementById("leanvault-field-toggle")?.remove();
+    showFieldMenu(input);
+  });
+}
+
+async function loadSuggestions(): Promise<void> {
+  const url = location.href;
+  if (suggestionsUrl === url) return;
+  if (suggestionsLoad) return suggestionsLoad.then(loadSuggestions);
+  suggestionsLoad = request({ type: "site.suggestions", url }).then((matches) => {
+    if (location.href !== url) return;
+    suggestions = matches.type === "siteSuggestions" ? matches.items : [];
+    suggestionsUrl = url;
+  }).catch(() => {
+    if (location.href === url) {
+      suggestions = [];
+      suggestionsUrl = url;
+    }
+  }).finally(() => { suggestionsLoad = null; });
+  return suggestionsLoad;
+}
+
+function observeDynamicCredentialFields(): void {
+  let scheduled = false;
+  const observer = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      const focused = deepActiveInput();
+      const focusedKind = focused?.type.toLowerCase() === "password" ? "password" : "username";
+      if (focused && isCredentialField(focused) && (focused !== activeField || focusedKind !== activeFieldKind)) {
+        activateField(focused);
+      } else if (activeField && (!activeField.isConnected || !isCredentialField(activeField))) {
+        activeField = null;
+        activeFieldKind = null;
+        document.getElementById("leanvault-field-toggle")?.remove();
+        closeFieldMenu();
+      }
+    });
+  });
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["type", "name", "id", "autocomplete", "placeholder", "aria-label", "aria-labelledby"],
+  });
 }
 
 function rememberInput(event: Event): void {
+  if (event.composedPath().some((target) => target instanceof Element && isExtensionElement(target))) return;
   const input = event.composedPath().find((target) => target instanceof HTMLInputElement);
   if (input instanceof HTMLInputElement && isUsernameField(input) && input.value) lastUsername = input.value;
 }
@@ -187,10 +242,12 @@ async function generateAndFill(input: HTMLInputElement, host: HTMLElement): Prom
 }
 
 function captureLogin(event: Event): void {
+  if (event.composedPath().some((target) => target instanceof Element && isExtensionElement(target))) return;
   inspectCredentials(event.target instanceof HTMLFormElement ? event.target : document);
 }
 
 function captureSubmitPointer(event: PointerEvent): void {
+  if (event.composedPath().some((target) => target instanceof Element && isExtensionElement(target))) return;
   const target = event.composedPath().find((value) => value instanceof Element);
   if (!(target instanceof Element)) return;
   const control = target.closest<HTMLElement>('button,input[type="submit"],[role="button"]');
@@ -199,6 +256,7 @@ function captureSubmitPointer(event: PointerEvent): void {
 }
 
 function captureEnter(event: KeyboardEvent): void {
+  if (event.composedPath().some((target) => target instanceof Element && isExtensionElement(target))) return;
   if (event.key !== "Enter") return;
   const input = event.composedPath().find((target) => target instanceof HTMLInputElement);
   if (input instanceof HTMLInputElement) inspectCredentials(input.form ?? document);
@@ -212,7 +270,7 @@ function looksLikeSubmit(control: HTMLElement): boolean {
 }
 
 function inspectCredentials(scope: ParentNode): void {
-  const passwordField = credentialInputs(scope).filter((input) => input.type.toLowerCase() === "password" && input.value).at(-1) ??
+  const passwordField = credentialInputs(scope).filter((input) => isPasswordField(input) && input.value).at(-1) ??
     findPasswordField();
   if (!passwordField?.value) return;
   const username = findUsernameField(passwordField)?.value || lastUsername;
@@ -231,7 +289,9 @@ function inspectCredentials(scope: ParentNode): void {
 }
 
 function renderSavePrompt(prompt: SitePrompt): void {
-  document.getElementById("leanvault-save-prompt")?.remove();
+  if (activeSavePromptId === prompt.id || prompt.expiresAt <= Date.now()) return;
+  dismissActiveSavePrompt?.();
+  activeSavePromptId = prompt.id;
   const host = overlayHost("leanvault-save-prompt");
   host.style.top = "18px";
   host.style.right = "18px";
@@ -263,25 +323,33 @@ function renderSavePrompt(prompt: SitePrompt): void {
   const dismiss = () => {
     if (dismissed) return;
     dismissed = true;
+    clearTimeout(dismissTimer);
+    activeSavePromptId = null;
     dismissActiveSavePrompt = null;
     void request({ type: "site.dismiss", promptId: prompt.id }).catch(() => undefined);
     host.remove();
   };
+  let dismissTimer = setTimeout(dismiss, Math.max(0, prompt.expiresAt - Date.now()));
   dismissActiveSavePrompt = dismiss;
-  root.querySelector<HTMLButtonElement>(".dismiss")!.addEventListener("click", dismiss);
-  root.querySelector<HTMLButtonElement>(".close")!.addEventListener("click", dismiss);
+  for (const button of root.querySelectorAll<HTMLButtonElement>(".dismiss,.close")) {
+    button.addEventListener("pointerdown", (event) => event.preventDefault());
+    button.addEventListener("click", dismiss);
+  }
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const save = root.querySelector<HTMLButtonElement>(".save")!;
     save.disabled = true;
+    clearTimeout(dismissTimer);
     save.textContent = "Saving…";
     const login: LoginWriteInput = { name: name.value, username: username.value, password: password.value, uri: uri.value };
     void request({ type: "site.save", promptId: prompt.id, login }).then(() => {
       dismissed = true;
+      activeSavePromptId = null;
       dismissActiveSavePrompt = null;
       host.remove();
       showTransient(prompt.action === "update" ? "Login updated." : "Login saved.");
     }).catch((error: unknown) => {
+      dismissTimer = setTimeout(dismiss, Math.max(0, prompt.expiresAt - Date.now()));
       save.disabled = false;
       save.textContent = prompt.action === "update" ? "Update" : "Save";
       showTransient(error instanceof Error ? error.message : "LeanVault could not save this login.");
@@ -364,11 +432,17 @@ function showTransient(message: string): void {
   setTimeout(() => host.remove(), 3_500);
 }
 
+function isExtensionElement(element: Element): boolean {
+  if (element.id.startsWith("leanvault-")) return true;
+  const root = element.getRootNode();
+  return root instanceof ShadowRoot && isExtensionElement(root.host);
+}
+
 function allRoots(): ParentNode[] {
   const roots: ParentNode[] = [document];
   for (let index = 0; index < roots.length; index += 1) {
     for (const element of roots[index]!.querySelectorAll<HTMLElement>("*")) {
-      if (element.shadowRoot) roots.push(element.shadowRoot);
+      if (element.shadowRoot && !isExtensionElement(element)) roots.push(element.shadowRoot);
     }
   }
   return roots;
@@ -380,8 +454,8 @@ function credentialInputs(scope?: ParentNode): HTMLInputElement[] {
 }
 
 function findPasswordField(preferred?: HTMLInputElement): HTMLInputElement | undefined {
-  if (preferred?.type.toLowerCase() === "password" && visible(preferred)) return preferred;
-  const passwords = credentialInputs().filter((input) => input.type.toLowerCase() === "password");
+  if (preferred && isPasswordField(preferred) && visible(preferred)) return preferred;
+  const passwords = credentialInputs().filter(isPasswordField);
   return passwords.find((input) => input.autocomplete.toLowerCase() === "current-password") ??
     passwords.find((input) => input.autocomplete.toLowerCase() !== "new-password") ?? passwords[0];
 }
@@ -402,23 +476,53 @@ function findUsernameField(password?: HTMLInputElement, preferred?: HTMLInputEle
   return candidates.sort((left, right) => score(right) - score(left))[0];
 }
 
+function isPasswordField(input: HTMLInputElement): boolean {
+  return input.type.toLowerCase() === "password" &&
+    !/one-time-code|\botp\b|verification.?code|security.?code|authenticator.?code/.test(inputHint(input));
+}
+
 function isCredentialField(input: HTMLInputElement): boolean {
-  return input.type.toLowerCase() === "password" || isUsernameField(input);
+  if (isExtensionElement(input)) return false;
+  return isPasswordField(input) || isUsernameField(input);
 }
 
 function isUsernameField(input: HTMLInputElement): boolean {
+  if (isExtensionElement(input)) return false;
   const type = input.type.toLowerCase();
-  if (!["", "text", "email", "tel"].includes(type)) return false;
   const hint = inputHint(input);
-  return !/search|otp|one-time|captcha/.test(hint) &&
-    (type === "email" || /username|user-name|login|email|e-mail|phone|mobile/.test(hint));
+  const root = input.getRootNode();
+  const scope = input.form ?? (root instanceof Document || root instanceof ShadowRoot ? root : document);
+  const eligibleFieldCount = credentialInputs(scope).filter((candidate) =>
+    canBeUsernameField(candidate.type, inputHint(candidate)),
+  ).length;
+  return looksLikeUsernameField({
+    type,
+    autocomplete: input.autocomplete,
+    inputHint: hint,
+    contextHint: credentialContextHint(input),
+    eligibleFieldCount,
+  });
 }
 
 function inputHint(input: HTMLInputElement): string {
-  return `${input.autocomplete} ${input.name} ${input.id} ${input.placeholder} ${input.getAttribute("aria-label") ?? ""}`.toLowerCase();
+  const root = input.getRootNode();
+  const labelledBy = (input.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean)
+    .map((id) => root instanceof Document || root instanceof ShadowRoot ? root.getElementById(id)?.textContent ?? "" : "")
+    .join(" ");
+  const labels = [...(input.labels ?? [])].map((label) => label.textContent ?? "").join(" ");
+  return `${input.autocomplete} ${input.name} ${input.id} ${input.placeholder} ${input.getAttribute("aria-label") ?? ""} ${labelledBy} ${labels}`.toLowerCase();
+}
+
+function credentialContextHint(input: HTMLInputElement): string {
+  const form = input.form;
+  const controls = form ? [...form.querySelectorAll<HTMLElement>('button,input[type="submit"],[role="button"]')]
+    .map((control) => `${control.textContent ?? ""} ${control.getAttribute("aria-label") ?? ""}`)
+    .join(" ") : "";
+  return `${document.title} ${location.pathname} ${form?.id ?? ""} ${form?.getAttribute("name") ?? ""} ${form?.getAttribute("action") ?? ""} ${form?.getAttribute("aria-label") ?? ""} ${controls}`;
 }
 
 function visible(input: HTMLInputElement): boolean {
+  if (isExtensionElement(input)) return false;
   if (input.disabled || input.readOnly || input.type.toLowerCase() === "hidden") return false;
   const bounds = input.getBoundingClientRect();
   const style = getComputedStyle(input);

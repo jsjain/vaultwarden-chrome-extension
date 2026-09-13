@@ -7,6 +7,7 @@ import {
   derivePbkdf2MasterKey,
   kdfFingerprint,
   stretchMasterKey,
+  sha256Base64,
 } from "../crypto/bitwarden-crypto";
 import { equalConstantTime, wipe } from "../crypto/bytes";
 import { generateTotp, type TotpResult } from "../crypto/totp";
@@ -28,6 +29,7 @@ import {
   writeAccountMetadata,
   writeAuthSession,
   type AccountMetadata,
+  type AuthSession,
 } from "../shared/storage";
 import { decryptVault, getVaultItemDetail, listVaultItems, matchesCurrentUrl } from "../vault/decrypt-vault";
 import type { VaultItem, VaultItemDetail, VaultItemSummary } from "../vault/models";
@@ -45,6 +47,14 @@ export class VaultController {
   private decryptionFailures = 0;
   private readonly repromptAuthorizations = new Map<string, number>();
   private readonly pendingCaptures = new Map<number, PendingCapture>();
+  private readonly pendingReady = chrome.storage.session.get("pendingSiteLogins").then((stored) => {
+    for (const [tabId, pending] of (stored.pendingSiteLogins ?? []) as [number, PendingCapture][]) {
+      if (pending.rememberUntil > Date.now()) this.pendingCaptures.set(tabId, pending);
+    }
+  });
+  private sessionRevision = 0;
+  private refreshTask: Promise<AuthSession> | null = null;
+  private syncTask: Promise<{ itemCount: number; failures: number }> | null = null;
 
   async getState(): Promise<PublicAppState> {
     const [snapshot, account, session] = await Promise.all([
@@ -145,11 +155,11 @@ export class VaultController {
         ...(login.privateKey ? { privateKey: login.privateKey } : {}),
       });
       try {
-        const result = await this.sync(userKey);
+        const result = await this.sync();
         return { status: "unlocked", itemCount: result.itemCount, failures: result.failures };
       } catch (error) {
         this.clearCache();
-        await Promise.all([clearAuthSession(), clearAccountMetadata(), clearEncryptedSync()]);
+        await Promise.all([clearAuthSession(), clearAccountMetadata(), clearEncryptedSync(), this.clearPendingSiteLogins()]);
         throw error;
       } finally {
         wipe(userKey);
@@ -211,18 +221,43 @@ export class VaultController {
 
   async lock(): Promise<void> {
     this.clearCache();
-    await updateSessionUserKey(null);
+    try {
+      await updateSessionUserKey(null);
+    } finally {
+      // Invalidate work that started while the stored key was being removed.
+      this.clearCache();
+    }
+    await this.clearPendingSiteLogins();
   }
 
   async logout(): Promise<void> {
     this.clearCache();
-    await Promise.all([clearAuthSession(), clearAccountMetadata(), clearEncryptedSync()]);
+    try {
+      await Promise.all([clearAuthSession(), clearAccountMetadata(), clearEncryptedSync()]);
+    } finally {
+      this.clearCache();
+    }
+    await this.clearPendingSiteLogins();
   }
 
-  async sync(providedUserKey?: Uint8Array): Promise<{ itemCount: number; failures: number }> {
+  async sync(): Promise<{ itemCount: number; failures: number }> {
+    const revision = this.sessionRevision;
+    const task = (this.syncTask ?? Promise.resolve()).catch(() => undefined).then(() => {
+      if (revision !== this.sessionRevision) throw new Error("The account session changed during sync.");
+      return this.performSync();
+    });
+    this.syncTask = task;
+    try {
+      return await task;
+    } finally {
+      if (this.syncTask === task) this.syncTask = null;
+    }
+  }
+
+  private async performSync(): Promise<{ itemCount: number; failures: number }> {
+    const revision = this.sessionRevision;
     let session = await this.refreshSessionIfNeeded(await requireSession());
-    const userKey = providedUserKey ?? requireUserKey(session.userKey);
-    const ownsUserKey = providedUserKey === undefined;
+    const userKey = session.userKey ? requireUserKey(session.userKey) : null;
     try {
       let payload;
       try {
@@ -234,22 +269,22 @@ export class VaultController {
         session = await this.refreshSession(session);
         payload = await this.client.getSync(session.baseUrl, session.accessToken);
       }
-      await writeEncryptedSync(payload);
       const account = await requireAccount();
-      const decrypted = await decryptVault(payload, userKey, account.privateKey);
-      this.vaultCache = decrypted.items;
-      this.decryptionFailures = decrypted.failures;
+      const decrypted = userKey ? await decryptVault(payload, userKey, account.privateKey) : null;
+      if (revision !== this.sessionRevision) throw new Error("The account session changed during sync.");
+      await writeEncryptedSync(payload);
+      if (revision !== this.sessionRevision) throw new Error("The account session changed during sync.");
+      this.vaultCache = decrypted?.items ?? null;
+      this.decryptionFailures = decrypted?.failures ?? 0;
       const updated: AccountMetadata = {
         ...account,
         lastSync: new Date().toISOString(),
-        itemCount: decrypted.items.length,
+        itemCount: decrypted?.items.length ?? account.itemCount ?? 0,
       };
       await writeAccountMetadata(updated);
-      return { itemCount: decrypted.items.length, failures: decrypted.failures };
+      return { itemCount: updated.itemCount!, failures: this.decryptionFailures };
     } finally {
-      if (ownsUserKey) {
-        wipe(userKey);
-      }
+      if (userKey) wipe(userKey);
     }
   }
 
@@ -288,7 +323,8 @@ export class VaultController {
     try {
       const payload = await createEncryptedLogin(input, userKey);
       await this.client.createCipher(session.baseUrl, session.accessToken, payload);
-      await this.sync(userKey);
+      // The write is committed; refresh failures are retried by the minute alarm.
+      await this.sync().catch(() => undefined);
     } finally {
       wipe(userKey);
     }
@@ -308,7 +344,8 @@ export class VaultController {
       const raw = await this.client.getCipher(session.baseUrl, session.accessToken, id);
       const payload = await updateEncryptedLogin(raw, input, userKey);
       await this.client.updateCipher(session.baseUrl, session.accessToken, id, payload);
-      await this.sync(userKey);
+      // The write is committed; refresh failures must not invite a second write.
+      await this.sync().catch(() => undefined);
     } finally {
       wipe(userKey);
     }
@@ -339,8 +376,15 @@ export class VaultController {
     username: string,
     password: string,
     options: BrowserIntegrationOptions,
-  ): Promise<({ id: string; action: "save" | "update" } & LoginWriteInput) | null> {
+    frameId = 0,
+  ): Promise<({ id: string; expiresAt: number; action: "save" | "update" } & LoginWriteInput) | null> {
+    await this.pendingReady;
+    const fingerprint = await sha256Base64(JSON.stringify([new URL(url).origin, username, password]));
     const matches = (await this.requireVault()).filter((item) => matchesCurrentUrl(item, url));
+    const previous = this.pendingCaptures.get(tabId);
+    if (previous?.fingerprint === fingerprint && previous.rememberUntil > Date.now()) {
+      return this.pendingSitePrompt(tabId, url, frameId);
+    }
     if (matches.some((item) => item.username === username && item.password === password)) return null;
     const update = matches.find(
       (item) => item.username === username && !item.organizationId && !item.reprompt,
@@ -350,6 +394,7 @@ export class VaultController {
     const name = update?.name ?? new URL(url).hostname.replace(/^www\./, "");
     const prompt = {
       id: crypto.randomUUID(),
+      expiresAt: Date.now() + options.savePromptTimeoutSeconds * 1000,
       action: update ? "update" as const : "save" as const,
       name,
       username,
@@ -362,19 +407,26 @@ export class VaultController {
       username,
       password,
       ...(update ? { updateId: update.id } : {}),
-      expiresAt: Date.now() + 120_000,
+      frameId,
+      fingerprint,
+      // ponytail: deduplicate a login flow for five minutes; use navigation tracking if flows need longer.
+      rememberUntil: Date.now() + 300_000,
     });
+    await this.persistPendingCaptures();
     return prompt;
   }
 
-  pendingSitePrompt(tabId: number) {
+  async pendingSitePrompt(tabId: number, url: string, frameId = 0) {
+    await this.pendingReady;
     const pending = this.pendingCaptures.get(tabId);
-    if (!pending || pending.expiresAt <= Date.now()) {
-      this.pendingCaptures.delete(tabId);
+    if (!pending || pending.frameId !== frameId || new URL(pending.url).origin !== new URL(url).origin) return null;
+    if (pending.dismissed || pending.expiresAt <= Date.now()) {
+      await this.dismissPendingSiteLogin(tabId, pending.id);
       return null;
     }
     return {
       id: pending.id,
+      expiresAt: pending.expiresAt,
       action: pending.action,
       name: pending.name,
       username: pending.username,
@@ -384,28 +436,55 @@ export class VaultController {
   }
 
   async savePendingSiteLogin(tabId: number, promptId: string, edited?: LoginWriteInput): Promise<void> {
+    await this.pendingReady;
     const pending = this.pendingCaptures.get(tabId);
-    if (!pending || pending.id !== promptId || pending.expiresAt <= Date.now()) {
-      this.pendingCaptures.delete(tabId);
+    if (!pending || pending.dismissed || pending.id !== promptId || pending.expiresAt <= Date.now()) {
       throw new Error("The save prompt expired. Submit the login form again.");
     }
-    this.pendingCaptures.delete(tabId);
+    if (pending.saving) throw new Error("This login is already being saved.");
+    pending.saving = true;
     const input: LoginWriteInput = edited ?? {
       name: pending.name,
       username: pending.username,
       password: pending.password,
       uri: pending.url,
     };
-    if (pending.updateId) await this.updateLogin(pending.updateId, input);
-    else await this.createLogin(input);
+    try {
+      if (pending.updateId) await this.updateLogin(pending.updateId, input);
+      else await this.createLogin(input);
+      await this.dismissPendingSiteLogin(tabId, promptId);
+    } finally {
+      pending.saving = false;
+    }
   }
 
-  dismissPendingSiteLogin(tabId: number, promptId: string): void {
-    if (this.pendingCaptures.get(tabId)?.id === promptId) this.pendingCaptures.delete(tabId);
+  async dismissPendingSiteLogin(tabId: number, promptId: string): Promise<void> {
+    await this.pendingReady;
+    const pending = this.pendingCaptures.get(tabId);
+    if (pending?.id !== promptId) return;
+    pending.dismissed = true;
+    pending.username = "";
+    pending.password = "";
+    await this.persistPendingCaptures();
   }
 
-  clearPendingSiteLogins(): void {
-    this.pendingCaptures.clear();
+  async clearPendingSiteLogins(tabId?: number): Promise<void> {
+    await this.pendingReady;
+    if (tabId === undefined) this.pendingCaptures.clear();
+    else this.pendingCaptures.delete(tabId);
+    await this.persistPendingCaptures();
+  }
+
+  private async persistPendingCaptures(): Promise<void> {
+    for (const [tabId, pending] of this.pendingCaptures) {
+      if (pending.rememberUntil <= Date.now()) this.pendingCaptures.delete(tabId);
+      else if (pending.expiresAt <= Date.now() && !pending.saving) {
+        pending.dismissed = true;
+        pending.username = "";
+        pending.password = "";
+      }
+    }
+    await chrome.storage.session.set({ pendingSiteLogins: [...this.pendingCaptures] });
   }
 
   async authorizeReprompt(id: string, masterPassword: string): Promise<void> {
@@ -460,7 +539,7 @@ export class VaultController {
   private async loadVault(userKey: Uint8Array, account: AccountMetadata): Promise<VaultItem[]> {
     const payload = await readEncryptedSync();
     if (!payload) {
-      const result = await this.sync(userKey);
+      const result = await this.sync();
       if (!this.vaultCache) {
         throw new Error(`Vault sync completed with ${result.itemCount} items but no cache.`);
       }
@@ -476,6 +555,7 @@ export class VaultController {
   }
 
   private clearCache(): void {
+    this.sessionRevision += 1;
     if (this.vaultCache) {
       for (const item of this.vaultCache) {
         item.username = "";
@@ -487,7 +567,6 @@ export class VaultController {
     this.vaultCache = null;
     this.decryptionFailures = 0;
     this.repromptAuthorizations.clear();
-    this.pendingCaptures.clear();
   }
 
   private isRepromptAuthorized(item: VaultItem): boolean {
@@ -513,11 +592,24 @@ export class VaultController {
     return session;
   }
 
-  private async refreshSession(session: Awaited<ReturnType<typeof requireSession>>) {
+  private async refreshSession(session: AuthSession): Promise<AuthSession> {
+    if (this.refreshTask) return this.refreshTask;
+    const task = this.performSessionRefresh(session);
+    this.refreshTask = task;
+    try {
+      return await task;
+    } finally {
+      if (this.refreshTask === task) this.refreshTask = null;
+    }
+  }
+
+  private async performSessionRefresh(session: AuthSession): Promise<AuthSession> {
     if (!session.refreshToken) {
       throw new Error("The account session expired. Sign in again.");
     }
+    const revision = this.sessionRevision;
     const refreshed = await this.client.refreshAccessToken(session.baseUrl, session.refreshToken);
+    if (revision !== this.sessionRevision) throw new Error("The account session changed during sync.");
     const updated = {
       ...session,
       accessToken: refreshed.accessToken,
@@ -540,6 +632,11 @@ interface PendingCapture {
   password: string;
   updateId?: string;
   expiresAt: number;
+  frameId: number;
+  fingerprint: string;
+  rememberUntil: number;
+  dismissed?: boolean;
+  saving?: boolean;
 }
 
 async function deriveMasterKey(

@@ -24,6 +24,13 @@ import { isAutoLockAlarm, touchAutoLock } from "./auto-lock";
 
 const client = new VaultwardenClient();
 const controller = new VaultController();
+const SYNC_ALARM = "leanvault-sync";
+
+// Check on each worker start: Chrome can clear alarms when the browser restarts.
+void chrome.alarms.get(SYNC_ALARM).then((alarm) => {
+  if (alarm?.periodInMinutes !== 1) return chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 1 });
+}).catch(() => undefined);
+chrome.tabs.onRemoved.addListener((tabId) => { void controller.clearPendingSiteLogins(tabId); });
 
 void restoreSiteIntegration().catch(() => configureSiteIntegration(false));
 
@@ -38,7 +45,10 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   void dispatch(message, sender)
     .then(async (data) => {
       const state = await controller.getState();
-      await touchAutoLock(state.phase === "unlocked");
+      // Passive refreshes must not keep an otherwise idle vault unlocked.
+      if (message.type !== "app.getState" && message.type !== "vault.list") {
+        await touchAutoLock(state.phase === "unlocked");
+      }
       sendResponse({ ok: true, data } satisfies ExtensionResponse);
     })
     .catch((error: unknown) => {
@@ -48,7 +58,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (isAutoLockAlarm(alarm)) void controller.lock();
+  if (isAutoLockAlarm(alarm)) void controller.lock().catch(() => undefined);
+  if (alarm.name === SYNC_ALARM) {
+    void controller.getState().then(async (state) => {
+      if (state.phase === "locked" || state.phase === "unlocked") await controller.sync();
+    }).catch(() => undefined); // Offline/expired sessions retry on the next alarm; manual sync reports errors.
+  }
 });
 
 async function dispatch(request: ExtensionRequest, sender: chrome.runtime.MessageSender): Promise<ResponseData> {
@@ -104,7 +119,7 @@ async function dispatch(request: ExtensionRequest, sender: chrome.runtime.Messag
       return currentSettings();
     case "settings.siteIntegration":
       await configureSiteIntegration(request.enabled);
-      if (!request.enabled) controller.clearPendingSiteLogins();
+      if (!request.enabled) await controller.clearPendingSiteLogins();
       return currentSettings();
     case "settings.vaultTimeout":
       {
@@ -137,14 +152,14 @@ async function dispatch(request: ExtensionRequest, sender: chrome.runtime.Messag
       const options = await requireSiteAllowed(request.url);
       return {
         type: "sitePrompt",
-        prompt: await controller.inspectSiteLogin(tabId, request.url, request.username, request.password, options),
+        prompt: await controller.inspectSiteLogin(tabId, request.url, request.username, request.password, options, sender.frameId ?? 0),
       };
     }
     case "site.pendingPrompt": {
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender);
       await requireSiteAllowed(sender.url!);
-      return { type: "sitePrompt", prompt: controller.pendingSitePrompt(tabId) };
+      return { type: "sitePrompt", prompt: await controller.pendingSitePrompt(tabId, sender.url!, sender.frameId ?? 0) };
     }
     case "site.generatePassword": {
       await requireSiteIntegrationEnabled();
@@ -156,13 +171,16 @@ async function dispatch(request: ExtensionRequest, sender: chrome.runtime.Messag
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender);
       await requireSiteAllowed(sender.url!);
+      const pending = await controller.pendingSitePrompt(tabId, sender.url!, sender.frameId ?? 0);
+      if (pending?.id !== request.promptId) throw new Error("The save prompt expired. Submit the login form again.");
       await controller.savePendingSiteLogin(tabId, request.promptId, request.login);
       return { type: "done" };
     }
     case "site.dismiss": {
       await requireSiteIntegrationEnabled();
       const tabId = requireSiteSender(sender);
-      controller.dismissPendingSiteLogin(tabId, request.promptId);
+      const pending = await controller.pendingSitePrompt(tabId, sender.url!, sender.frameId ?? 0);
+      if (pending?.id === request.promptId) await controller.dismissPendingSiteLogin(tabId, request.promptId);
       return { type: "done" };
     }
   }

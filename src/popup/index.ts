@@ -95,6 +95,7 @@ const generatorLowercase = element<HTMLInputElement>("generator-lowercase");
 const generatorNumbers = element<HTMLInputElement>("generator-numbers");
 const generatorSymbols = element<HTMLInputElement>("generator-symbols");
 const askAddLogin = element<HTMLInputElement>("ask-add-login");
+const savePromptTimeout = element<HTMLInputElement>("save-prompt-timeout");
 const askUpdateLogin = element<HTMLInputElement>("ask-update-login");
 const excludedDomainForm = element<HTMLFormElement>("excluded-domain-form");
 const excludedDomain = element<HTMLInputElement>("excluded-domain");
@@ -111,6 +112,11 @@ let totalItems = 0;
 let currentView: keyof typeof views = "setup";
 
 void initialize().catch(showError);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.accountMetadata) return;
+  if (currentView === "vault") void refreshState();
+});
 
 serverForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -187,6 +193,9 @@ for (const input of [
 }
 askAddLogin.addEventListener("change", () => void updateBrowserOptions());
 askUpdateLogin.addEventListener("change", () => void updateBrowserOptions());
+savePromptTimeout.addEventListener("change", () => {
+  if (savePromptTimeout.reportValidity()) void updateBrowserOptions();
+});
 excludedDomainForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void addExcludedDomain();
@@ -225,6 +234,7 @@ async function refreshSettings(): Promise<void> {
   vaultTimeout.value = String(vaultTimeoutMinutes);
   askAddLogin.checked = browserOptions.askAddLogin;
   askUpdateLogin.checked = browserOptions.askUpdateLogin;
+  savePromptTimeout.value = String(browserOptions.savePromptTimeoutSeconds);
   generatorLength.value = String(generatorOptions.length);
   generatorUppercase.checked = generatorOptions.uppercase;
   generatorLowercase.checked = generatorOptions.lowercase;
@@ -260,6 +270,7 @@ async function updateBrowserOptions(next?: BrowserIntegrationOptions): Promise<v
     ...browserOptions,
     askAddLogin: askAddLogin.checked,
     askUpdateLogin: askUpdateLogin.checked,
+    savePromptTimeoutSeconds: Number(savePromptTimeout.value),
   };
   try {
     const data = await request({ type: "settings.browserOptions", options });
@@ -267,12 +278,14 @@ async function updateBrowserOptions(next?: BrowserIntegrationOptions): Promise<v
     browserOptions = data.browserOptions;
     askAddLogin.checked = browserOptions.askAddLogin;
     askUpdateLogin.checked = browserOptions.askUpdateLogin;
+    savePromptTimeout.value = String(browserOptions.savePromptTimeoutSeconds);
     renderExcludedDomains();
     showStatus("Save-to-vault preferences updated.", "success");
   } catch (error) {
     browserOptions = previous;
     askAddLogin.checked = previous.askAddLogin;
     askUpdateLogin.checked = previous.askUpdateLogin;
+    savePromptTimeout.value = String(previous.savePromptTimeoutSeconds);
     showError(error);
   }
 }

@@ -28,7 +28,7 @@ describe("browser integration settings", () => {
       askUpdateLogin: true,
       excludedDomains: ["https://www.Example.com/path", "example.com", ""],
     });
-    expect(options).toEqual({ askAddLogin: false, askUpdateLogin: true, excludedDomains: ["example.com"] });
+    expect(options).toEqual({ askAddLogin: false, askUpdateLogin: true, savePromptTimeoutSeconds: 10, excludedDomains: ["example.com"] });
     expect(isUrlExcluded("https://accounts.example.com/login", options)).toBe(true);
     expect(isUrlExcluded("https://notexample.com/login", options)).toBe(false);
   });
@@ -36,7 +36,7 @@ describe("browser integration settings", () => {
   it("validates browser and generator preference messages", () => {
     expect(isExtensionRequest({
       type: "settings.browserOptions",
-      options: { askAddLogin: true, askUpdateLogin: true, excludedDomains: ["example.com"] },
+      options: { askAddLogin: true, askUpdateLogin: true, savePromptTimeoutSeconds: 10, excludedDomains: ["example.com"] },
     })).toBe(true);
     expect(isExtensionRequest({
       type: "settings.generator",
@@ -44,4 +44,15 @@ describe("browser integration settings", () => {
     })).toBe(true);
     expect(normalizeGeneratorOptions({ length: 2 })).toMatchObject({ length: 22 });
   });
+});
+
+it("defaults old settings to ten seconds and validates prompt timeouts", () => {
+  expect(normalizeBrowserIntegrationOptions({}).savePromptTimeoutSeconds).toBe(10);
+  expect(normalizeBrowserIntegrationOptions({ savePromptTimeoutSeconds: 45 }).savePromptTimeoutSeconds).toBe(45);
+  for (const value of [0, -1, 301, 1.5, "10", NaN]) {
+    expect(normalizeBrowserIntegrationOptions({ savePromptTimeoutSeconds: value }).savePromptTimeoutSeconds).toBe(10);
+    expect(isExtensionRequest({ type: "settings.browserOptions", options: {
+      askAddLogin: true, askUpdateLogin: true, excludedDomains: [], savePromptTimeoutSeconds: value,
+    } })).toBe(false);
+  }
 });

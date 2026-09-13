@@ -5,6 +5,7 @@ export type VaultTimeoutMinutes = (typeof VAULT_TIMEOUT_OPTIONS)[number];
 export interface BrowserIntegrationOptions {
   askAddLogin: boolean;
   askUpdateLogin: boolean;
+  savePromptTimeoutSeconds: number;
   excludedDomains: string[];
 }
 
@@ -24,6 +25,7 @@ const GENERATOR_OPTIONS_KEY = "leanvault.generatorOptions";
 export const DEFAULT_BROWSER_INTEGRATION_OPTIONS: BrowserIntegrationOptions = {
   askAddLogin: true,
   askUpdateLogin: true,
+  savePromptTimeoutSeconds: 10,
   excludedDomains: [],
 };
 
@@ -67,13 +69,14 @@ export function normalizeBrowserIntegrationOptions(value: unknown): BrowserInteg
   return {
     askAddLogin: typeof value.askAddLogin === "boolean" ? value.askAddLogin : true,
     askUpdateLogin: typeof value.askUpdateLogin === "boolean" ? value.askUpdateLogin : true,
+    savePromptTimeoutSeconds: isPromptTimeout(value.savePromptTimeoutSeconds) ? value.savePromptTimeoutSeconds : 10,
     excludedDomains,
   };
 }
 
 export function isBrowserIntegrationOptions(value: unknown): value is BrowserIntegrationOptions {
   if (!isRecord(value) || typeof value.askAddLogin !== "boolean" || typeof value.askUpdateLogin !== "boolean") return false;
-  return Array.isArray(value.excludedDomains) && value.excludedDomains.length <= 200 &&
+  return isPromptTimeout(value.savePromptTimeoutSeconds) && Array.isArray(value.excludedDomains) && value.excludedDomains.length <= 200 &&
     value.excludedDomains.every((domain) => typeof domain === "string" && domain.length > 0 && domain.length <= 253);
 }
 
@@ -128,4 +131,8 @@ function normalizeDomain(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPromptTimeout(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 300;
 }
