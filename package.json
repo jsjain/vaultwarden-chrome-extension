@@ -29,10 +29,10 @@
     "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm check:dist && pnpm check:size"
   },
   "devDependencies": {
-    "@types/chrome": "0.2.5",
-    "esbuild": "0.28.1",
+    "@types/chrome": "0.2.9",
+    "esbuild": "0.28.2",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "5.0.0"
   },
   "dependencies": {
     "hash-wasm": "4.12.0"
